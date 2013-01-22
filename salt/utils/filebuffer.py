@@ -3,10 +3,15 @@
     salt.utils.filebuffer
     ~~~~~~~~~~~~~~~~~~~~~
 
-    :copyright: © 2012 UfSoft.org - :email:`Pedro Algarvio (pedro@algarvio.me)`
+    This utility allows parsing a file in chunks.
+
+    :codeauthor: :email:`Pedro Algarvio (pedro@algarvio.me)`
+    :copyright: © 2012 by the SaltStack Team, see AUTHORS for more details.
     :license: Apache 2.0, see LICENSE for more details.
 '''
 
+# Import salt libs
+import salt.utils
 from salt.exceptions import SaltException
 
 
@@ -22,6 +27,16 @@ class BufferedReader(object):
     X configurable bytes in memory which can be used to, for example,
     do regex search/matching on more than a single line.
 
+    So, **an imaginary, non accurate**, example could be:
+
+        1 - Initiate the BufferedReader filing it to max_in_men:
+            br = [1, 2, 3]
+
+        2 - next chunk(pop chunk_size from the left, append chunk_size to the
+        right):
+            br = [2, 3, 4]
+
+
     :type  path: str
     :param path: The file path to be read
 
@@ -36,12 +51,12 @@ class BufferedReader(object):
     :param mode: The mode the file should be opened. **Only read modes**.
 
     '''
-    def __init__(self, path, max_in_mem=256*1024, chunk_size=32*1024,
+    def __init__(self, path, max_in_mem=256 * 1024, chunk_size=32 * 1024,
                  mode='r'):
         if 'a' in mode or 'w' in mode:
             raise InvalidFileMode("Cannot open file in write or append mode")
         self.__path = path
-        self.__file = open(self.__path, mode)
+        self.__file = salt.utils.fopen(self.__path, mode)
         self.__max_in_mem = max_in_mem
         self.__chunk_size = chunk_size
         self.__buffered = None
@@ -56,6 +71,11 @@ class BufferedReader(object):
         return self
 
     def next(self):
+        '''
+        Return the next iteration by popping `chunk_size` from the left and
+        appending `chunk_size` to the right if there's info on the file left
+        to be read.
+        '''
         if self.__buffered is None:
             multiplier = self.__max_in_mem / self.__chunk_size
             self.__buffered = ""
@@ -63,7 +83,7 @@ class BufferedReader(object):
             multiplier = 1
             self.__buffered = self.__buffered[self.__chunk_size:]
 
-        data = self.__file.read(self.__chunk_size*multiplier)
+        data = self.__file.read(self.__chunk_size * multiplier)
 
         if not data:
             self.__file.close()
@@ -72,29 +92,28 @@ class BufferedReader(object):
         self.__buffered += data
         return self.__buffered
 
-
     # Support with statements
     def __enter__(self):
         return self
 
-    def __exit__(self, exc_type, exc_value, tb):
+    def __exit__(self, exc_type, exc_value, traceback):
         pass
 
 
-if __name__ == '__main__':
+def _main():
     def timeit_string(fpath, max_size, chunk_size):
 
-        sf = BufferedReader(fpath, max_size, chunk_size)
-        for chunk in sf:
+        breader = BufferedReader(fpath, max_size, chunk_size)
+        for chunk in breader:
             chunk
         return
 
     def sizeof_fmt(num):
-        for x in ['bytes','KB','MB','GB']:
+        for unit in ['bytes', 'KB', 'MB', 'GB']:
             if num < 1024.0:
-                return "%3.1f%s" % (num, x)
+                return '{0:3.1f}{1}'.format(num, unit)
             num /= 1024.0
-        return "%3.1f%s" % (num, 'TB')
+        return '{0:3.1f}{1}'.format(num, 'TB')
 
     import os, timeit
     fpath = os.path.normpath(os.path.join(
@@ -105,22 +124,35 @@ if __name__ == '__main__':
     tpath = "/tmp/starting_states.rst"
 
     for fmultiplier in (1, 10, 50, 100, 800, 3200):
-        ffile = open(tpath, "w")
+        ffile = salt.utils.fopen(tpath, "w")
         while fmultiplier > 0:
-            ffile.write(open(fpath).read())
+            ffile.write(salt.utils.fopen(fpath).read())
             fmultiplier -= 1
 
         ffile.close()
 
-        TNUMBER = 1000
+        tnumber = 1000
 
-        print "Running tests against a file with the size of %s" % sizeof_fmt(os.stat(tpath).st_size)
+        print('Running tests against a file with the size of {0}'.format(
+            sizeof_fmt(os.stat(tpath).st_size))
+        )
 
-        for idx, multiplier in enumerate([4, 8, 16, 32, 64, 128, 256]):
+        for multiplier in [4, 8, 16, 32, 64, 128, 256]:
             chunk_size = multiplier * 1024
             max_size = chunk_size * 5
-            t = timeit.Timer("timeit_string('%s', %d, %d)" % (tpath, max_size, chunk_size), "from __main__ import timeit_string")
-            print "timeit_string ({0: >7} chunks; max: {1: >7}):".format(sizeof_fmt(chunk_size), sizeof_fmt(max_size)),
-            print u"{0: >6} \u00B5sec/pass".format(u"%.2f" % (TNUMBER * t.timeit(number=TNUMBER)/TNUMBER))
+            timer = timeit.Timer(
+                "timeit_string('{0}', {1:d}, {2:d})".format(
+                    tpath, max_size, chunk_size
+                ), "from __main__ import timeit_string"
+            )
+            print("timeit_string ({0: >7} chunks; max: {1: >7}):".format(
+                sizeof_fmt(chunk_size), sizeof_fmt(max_size))),
+            print(u"{0: >6} \u00B5sec/pass".format(u"{0:0.2f}".format(
+                tnumber * timer.timeit(number=tnumber) / tnumber
+            )))
 
         print
+
+
+if __name__ == '__main__':
+    _main()

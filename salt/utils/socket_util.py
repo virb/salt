@@ -1,12 +1,22 @@
-import socket
+'''
+Define some generic socket functions for network modules
+'''
 
-def _sanitize_host(host):
+# Import python libs
+import socket
+from string import ascii_letters, digits
+
+
+# pylint: disable-msg=C0103
+
+def sanitize_host(host):
     '''
     Sanitize host string.
     '''
     return ''.join([
         c for c in host[0:255] if c in (ascii_letters + digits + '.-')
     ])
+
 
 def isportopen(host, port):
     '''
@@ -21,7 +31,7 @@ def isportopen(host, port):
         return False
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    out = sock.connect_ex((_sanitize_host(host), int(port)))
+    out = sock.connect_ex((sanitize_host(host), int(port)))
 
     return out
 
@@ -40,6 +50,7 @@ def host_to_ip(host):
         ip = None
     return ip
 
+
 def ip_to_host(ip):
     '''
     Returns the hostname of a given IP
@@ -53,3 +64,5 @@ def ip_to_host(ip):
     except Exception:
         hostname = None
     return hostname
+
+# pylint: enable-msg=C0103

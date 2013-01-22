@@ -1,31 +1,20 @@
 '''
 Jinja loading utils to enable a more powerful backend for jinja templates
 '''
+
 # Import python libs
 from os import path
+import logging
 
-# Import third-party libs
-from jinja2 import Template, BaseLoader, Environment, StrictUndefined
-from jinja2.loaders import split_template_path
+# Import third party libs
+from jinja2 import BaseLoader
 from jinja2.exceptions import TemplateNotFound
 
-# Import Salt libs
+# Import salt libs
 import salt
 import salt.fileclient
 
-
-def get_template(filename, opts, env):
-    loader = SaltCacheLoader(opts, env)
-    if filename.startswith(loader.searchpath):
-        jinja = Environment(loader=loader, undefined=StrictUndefined)
-        relpath = path.relpath(filename, loader.searchpath)
-        # the template was already fetched
-        loader.cached.append(relpath)
-        return jinja.get_template(relpath)
-    else:
-        # fallback for templates outside the state tree
-        with open(filename, 'r') as f:
-            return Template(f.read())
+log = logging.getLogger(__name__)
 
 
 class SaltCacheLoader(BaseLoader):
@@ -40,7 +29,11 @@ class SaltCacheLoader(BaseLoader):
         self.opts = opts
         self.env = env
         self.encoding = encoding
-        self.searchpath = path.join(opts['cachedir'], 'files', env)
+        if opts.get('file_client', 'remote') == 'local':
+            self.searchpath = opts['file_roots'][env]
+        else:
+            self.searchpath = [path.join(opts['cachedir'], 'files', env)]
+        log.debug('Jinja search path: \'{0}\''.format(self.searchpath))
         self._file_client = None
         self.cached = []
 
@@ -69,19 +62,29 @@ class SaltCacheLoader(BaseLoader):
 
     def get_source(self, environment, template):
         # checks for relative '..' paths
-        template = path.join(*split_template_path(template))
-        self.check_cache(template)
-        filepath = path.join(self.searchpath, template)
-        with open(filepath, 'rb') as f:
-            try:
-                contents = f.read().decode(self.encoding)
-            except IOError:
-                raise TemplateNotFound(template)
-        mtime = path.getmtime(filepath)
+        if '..' in template:
+            log.warning(
+                'Discarded template path \'{0}\', relative paths are '
+                'prohibited'.format(template)
+            )
+            raise TemplateNotFound(template)
 
-        def uptodate():
+        self.check_cache(template)
+        for spath in self.searchpath:
+            filepath = path.join(spath, template)
             try:
-                return path.getmtime(filepath) == mtime
-            except OSError:
-                return False
-        return contents, filepath, uptodate
+                with salt.utils.fopen(filepath, 'rb') as ifile:
+                    contents = ifile.read().decode(self.encoding)
+                    mtime = path.getmtime(filepath)
+
+                    def uptodate():
+                        try:
+                            return path.getmtime(filepath) == mtime
+                        except OSError:
+                            return False
+                    return contents, filepath, uptodate
+            except IOError:
+                # there is no file under current path
+                continue
+        # there is no template file within searchpaths
+        raise TemplateNotFound(template)

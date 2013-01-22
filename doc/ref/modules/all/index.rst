@@ -1,8 +1,8 @@
 .. _all-salt.modules:
 
-============================
-Full list of builtin modules
-============================
+======================================
+Full list of builtin execution modules
+======================================
 
 .. admonition:: Virtual modules
 
@@ -18,58 +18,82 @@ Full list of builtin modules
     :template: autosummary.rst.tmpl
 
     aliases
+    alternatives
     apache
     apt
     archive
+    at
     augeas_cfg
     bluez
     brew
     butterkvm
-    ca
     cassandra
     cluster
     cmdmod
+    config
     cp
     cron
+    daemontools
     data
     debconfmod
     debian_service
     disk
-    django
+    djangomod
     ebuild
+    eix
     event
+    extfs
     file
     freebsdjail
     freebsdkmod
     freebsdpkg
     freebsdservice
+    freebsd_sysctl
     gem
+    gentoolkitmod
     gentoo_service
     git
+    glance
     grains
     groupadd
-    grub
+    grub_legacy
     hg
     hosts
+    iptables
+    keyboard
+    keystone
     kmod
     kvm_hyper
     launchctl
+    layman
+    ldapmod
+    linux_acl
+    linux_lvm
     linux_sysctl
+    locale
+    makeconf
     mdadm
+    mongodb
     monit
     moosefs
     mount
     mysql
     network
     nginx
+    nova
     nzbget
     openbsdpkg
     openbsdservice
     osxdesktop
     pacman
+    pam
+    parted
+    pecl
     pillar
     pip
     pkgng
+    pkg_resource
+    pkgutil
     postgres
     poudriere
     ps
@@ -77,8 +101,9 @@ Full list of builtin modules
     puppet
     pw_group
     pw_user
-    rabbitmq_server
+    rabbitmq
     reg
+    ret
     rh_ip
     rh_service
     rvm
@@ -86,13 +111,24 @@ Full list of builtin modules
     selinux
     service
     shadow
+    smf
+    solaris_group
+    solarispkg
+    solaris_shadow
+    solaris_user
     solr
     sqlite3
     ssh
     state
     status
+    supervisord
+    svn
+    sysbench
+    sysmod
     systemd
     test
+    timezone
+    tls
     tomcat
     upstart
     useradd
@@ -105,8 +141,9 @@ Full list of builtin modules
     win_pkg
     win_service
     win_shadow
+    win_status
     win_useradd
     yumpkg5
     yumpkg
-    zfs
+    zpool
     zypper

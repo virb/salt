@@ -1,16 +1,20 @@
 # -*- coding: utf-8 -*-
-"""
-    tests.unit.utils.runtime_whitespace_regex
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+'''
+    tests.unit.utils.runtime_whitespace_regex_test
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    :copyright: © 2012 UfSoft.org - :email:`Pedro Algarvio (pedro@algarvio.me)`
+    :codeauthor: :email:`Pedro Algarvio (pedro@algarvio.me)`
+    :copyright: © 2012 by the SaltStack Team, see AUTHORS for more details.
     :license: Apache 2.0, see LICENSE for more details.
-"""
+'''
 
+# Import python libs
 import re
-from saltunittest import TestCase, TestLoader, TextTestRunner, skipIf
 
+# Import salt libs
+from saltunittest import TestCase, TestLoader, TextTestRunner
 from salt.utils import build_whitepace_splited_regex
+
 
 DOUBLE_TXT = """\
 # set variable identifying the chroot you work in (used in the prompt below)
@@ -38,6 +42,13 @@ if [ -z "$debian_chroot" ] && [ -r /etc/debian_chroot ]; then
 fi
 """
 
+SINGLE_DOUBLE_SAME_LINE_TXT = """\
+# set variable identifying the chroot you work in (used in the prompt below)
+if [ -z '$debian_chroot' ] && [ -r "/etc/debian_chroot" ]; then
+    debian_chroot=$(cat /etc/debian_chroot)
+fi
+"""
+
 MATCH = """\
 # set variable identifying the chroot you work in (used in the prompt below)
 if [ -z '$debian_chroot' ] && [ -r /etc/debian_chroot ]; then
@@ -61,7 +72,14 @@ fi
 if [ -z '$debian_chroot' ] && [ -r /etc/debian_chroot ]; then
     debian_chroot=$(cat /etc/debian_chroot)
 fi
+
+
+# set variable identifying the chroot you work in (used in the prompt below)
+if [ -z '$debian_chroot' ] && [ -r "/etc/debian_chroot" ]; then
+    debian_chroot=$(cat /etc/debian_chroot)
+fi
 """
+
 
 class TestRuntimeWhitespaceRegex(TestCase):
 
@@ -76,6 +94,11 @@ class TestRuntimeWhitespaceRegex(TestCase):
     def test_single_and_double_quotes(self):
         regex = build_whitepace_splited_regex(SINGLE_DOUBLE_TXT)
         self.assertTrue(re.search(regex, MATCH))
+
+    def test_issue_2227(self):
+        regex = build_whitepace_splited_regex(SINGLE_DOUBLE_SAME_LINE_TXT)
+        self.assertTrue(re.search(regex, MATCH))
+
 
 if __name__ == "__main__":
     loader = TestLoader()

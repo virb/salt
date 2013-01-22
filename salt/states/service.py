@@ -10,6 +10,29 @@ rc scripts, services can be defined as running or dead.
     httpd:
       service:
         - running
+
+The service can also be set to be started at runtime via the enable option:
+
+.. code-block:: yaml
+
+    openvpn:
+      service:
+        - running
+        - enable: True
+
+By default if a service is triggered to refresh due to a watch statement the
+service is by default restarted. If the desired behaviour is to reload the
+service then set the reload value to True:
+
+.. code-block:: yaml
+
+    redis:
+      service:
+        - running
+        - enable: True
+        - reload: True
+        - watch:
+          - pkg: redis
 '''
 
 
@@ -20,26 +43,7 @@ def __virtual__():
     return 'service'
 
 
-def _get_stat(name, sig):
-    '''
-    Return the status of a service based on signature and status, if the
-    signature is used then the status option will be ignored
-    '''
-    stat = False
-    if sig:
-        if sig == 'detect':
-            cmd = "{0[ps]} | grep {1} | grep -v grep | awk '{{print $2}}'"
-            cmd = cmd.format(__grains__, name)
-        else:
-            cmd = "{0[ps]} | grep {1} | grep -v grep | awk '{{print $2}}'"
-            cmd = cmd.format(__grains__, sig)
-        stat = bool(__salt__['cmd.run'](cmd))
-    else:
-        stat = __salt__['service.status'](name)
-    return stat
-
-
-def _enable(name, started):
+def _enable(name, started, **kwargs):
     '''
     Enable the service
     '''
@@ -67,7 +71,6 @@ def _enable(name, started):
     if __salt__['service.enabled'](name):
         # Service is enabled
         if started is True:
-            ret['changes'][name] = True
             ret['comment'] = ('Service {0} is already enabled,'
                 ' and is running').format(name)
             return ret
@@ -86,7 +89,7 @@ def _enable(name, started):
         ret['comment'] = 'Service {0} set to be enabled'.format(name)
         return ret
 
-    if __salt__['service.enable'](name):
+    if __salt__['service.enable'](name, **kwargs):
         # Service has been enabled
         if started is True:
             ret['changes'][name] = True
@@ -123,7 +126,7 @@ def _enable(name, started):
         return ret
 
 
-def _disable(name, started):
+def _disable(name, started, **kwargs):
     '''
     Disable the service
     '''
@@ -170,7 +173,7 @@ def _disable(name, started):
         ret['comment'] = 'Service {0} set to be disabled'.format(name)
         return ret
 
-    if __salt__['service.disable'](name):
+    if __salt__['service.disable'](name, **kwargs):
         # Service has been disabled
         if started is True:
             ret['changes'][name] = True
@@ -207,7 +210,19 @@ def _disable(name, started):
         return ret
 
 
-def running(name, enable=None, sig=None):
+def _available(name, ret):
+    # Check if the service is available
+    if 'service.available' in __salt__:
+        ret['available'] = __salt__['service.available'](name)
+    elif 'service.get_all' in __salt__:
+        ret['available'] = name in __salt__['service.get_all']()
+    if not ret.get('available', True):
+        ret['result'] = False
+        ret['comment'] = 'The named service {0} is not available'.format(name)
+    return ret
+
+
+def running(name, enable=None, sig=None, **kwargs):
     '''
     Verify that the service is running
 
@@ -227,24 +242,19 @@ def running(name, enable=None, sig=None):
            'result': True,
            'comment': ''}
     # See if the service is already running
-    if _get_stat(name, sig):
+    if __salt__['service.status'](name, sig):
         ret['comment'] = 'The service {0} is already running'.format(name)
         if enable is True:
-            return _enable(name, None)
+            return _enable(name, None, **kwargs)
         elif enable is False:
-            return _disable(name, None)
+            return _disable(name, None, **kwargs)
         else:
             return ret
 
-    # Check if the service is available
-    if 'service.get_all' in __salt__:
-        # get_all is available, we can reliable check for the service
-        services = __salt__['service.get_all']()
-        if not name in services:
-            ret['result'] = False
-            ret['comment'] = 'The named service {0} is not available'.format(
-                    name)
-            return ret
+    # Check if the service is available:
+    ret = _available(name, ret)
+    if not ret.pop('available', True):
+        return ret
 
     # Run the tests
     if __opts__['test']:
@@ -258,23 +268,24 @@ def running(name, enable=None, sig=None):
         ret['result'] = False
         ret['comment'] = 'Service {0} failed to start'.format(name)
         if enable is True:
-            return _enable(name, False)
+            ret = _enable(name, False, **kwargs)
+            ret['result'] = False
         elif enable is False:
-            return _disable(name, False)
+            return _disable(name, False, **kwargs)
         else:
             return ret
 
     if enable is True:
-        return _enable(name, True)
+        return _enable(name, True, **kwargs)
     elif enable is False:
-        return _disable(name, True)
+        return _disable(name, True, **kwargs)
     else:
         ret['changes'] = changes
         ret['comment'] = 'Started Service {0}'.format(name)
         return ret
 
 
-def dead(name, enable=None, sig=None):
+def dead(name, enable=None, sig=None, **kwargs):
     '''
     Ensure that the named service is dead
 
@@ -293,24 +304,19 @@ def dead(name, enable=None, sig=None):
            'changes': {},
            'result': True,
            'comment': ''}
-    if not _get_stat(name, sig):
+    if not __salt__['service.status'](name, sig):
         ret['comment'] = 'The service {0} is already dead'.format(name)
         if enable is True:
-            return _enable(name, None)
+            return _enable(name, None, **kwargs)
         elif enable is False:
-            return _disable(name, None)
+            return _disable(name, None, **kwargs)
         else:
             return ret
 
-    # Check if the service is available
-    if 'service.get_all' in __salt__:
-        # get_all is available, we can reliable check for the service
-        services = __salt__['service.get_all']()
-        if not name in services:
-            ret['result'] = False
-            ret['comment'] = 'The named service {0} is not available'.format(
-                    name)
-            return ret
+    # Check if the service is available:
+    ret = _available(name, ret)
+    if not ret.pop('available', True):
+        return ret
 
     if __opts__['test']:
         ret['result'] = None
@@ -337,7 +343,7 @@ def dead(name, enable=None, sig=None):
         return ret
 
 
-def enabled(name):
+def enabled(name, **kwargs):
     '''
     Verify that the service is enabled on boot, only use this state if you
     don't want to manage the running process, remember that if you want to
@@ -347,10 +353,10 @@ def enabled(name):
     name
         The name of the init or rc script used to manage the service
     '''
-    return _enable(name, None)
+    return _enable(name, None, **kwargs)
 
 
-def disabled(name):
+def disabled(name, **kwargs):
     '''
     Verify that the service is disabled on boot, only use this state if you
     don't want to manage the running process, remember that if you want to
@@ -360,10 +366,10 @@ def disabled(name):
     name
         The name of the init or rc script used to manage the service
     '''
-    return _disable(name, None)
+    return _disable(name, None, **kwargs)
 
 
-def mod_watch(name, sig=None, reload=False):
+def mod_watch(name, sig=None, reload=False, full_restart=False):
     '''
     The service watcher, called to invoke the watch command.
 
@@ -375,15 +381,18 @@ def mod_watch(name, sig=None, reload=False):
     '''
     if __salt__['service.status'](name, sig):
         if 'service.reload' in __salt__ and reload:
-            changes = {name: __salt__['service.reload'](name)}
+            restart_func = __salt__['service.reload']
+        elif 'service.full_restart' in __salt__ and full_restart:
+            restart_func = __salt__['service.full_restart']
         else:
-            changes = {name: __salt__['service.restart'](name)}
-        return {'name': name,
-                'changes': changes,
-                'result': True,
-                'comment': 'Service restarted'}
+            restart_func = __salt__['service.restart']
+    else:
+        restart_func = __salt__['service.start']
 
+    result = restart_func(name)
     return {'name': name,
-            'changes': {},
-            'result': True,
-            'comment': 'Service {0} started'.format(name)}
+            'changes': {name: result},
+            'result': result,
+            'comment': 'Service restarted' if result else \
+                       'Failed to restart the service'
+           }

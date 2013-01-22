@@ -1,30 +1,39 @@
 '''
 The networking module for RHEL/Fedora based distros
 '''
+
 # Import python libs
 import logging
 import re
-from os.path import exists, join
+import os.path
+import os
 import StringIO
 
 # import third party libs
 import jinja2
+from jinja2.exceptions import TemplateNotFound
+
+# Import salt libs
+import salt.utils
+from salt.modules import __path__ as saltmodpath
 
 # Set up logging
 log = logging.getLogger(__name__)
 
 # Set up template environment
-env = jinja2.Environment(loader=jinja2.PackageLoader('salt.modules', 'rh_ip'))
+ENV = jinja2.Environment(
+    loader=jinja2.FileSystemLoader(saltmodpath[0] + os.sep + 'rh_ip')
+)
 
 
 def __virtual__():
     '''
     Confine this module to RHEL/Fedora based distros$
     '''
-    dists = ('CentOS', 'Scientific', 'RedHat', 'Fedora')
-    if __grains__['os'] in dists:
+    if __grains__['os_family'] == 'RedHat':
         return 'ip'
     return False
+
 
 # Setup networking attributes
 _ETHTOOL_CONFIG_OPTS = [
@@ -70,6 +79,7 @@ def _log_default_iface(iface, opt, value):
     msg = 'Using default option -- Interface: {0} Option: {1} Value: {2}'
     log.info(msg.format(iface, opt, value))
 
+
 def _error_msg_network(option, expected):
     '''
     Build an appropriate error message from a given option and
@@ -78,9 +88,11 @@ def _error_msg_network(option, expected):
     msg = 'Invalid network setting -- Setting: {0}, Expected: [{1}]'
     return msg.format(option, '|'.join(expected))
 
+
 def _log_default_network(opt, value):
     msg = 'Using existing setting -- Setting: {0} Value: {1}'
     log.info(msg.format(opt, value))
+
 
 def _parse_rh_config(path):
     rh_config = _read_file(path)
@@ -91,12 +103,13 @@ def _parse_rh_config(path):
             if len(line) == 0 or line.startswith('!') or line.startswith('#'):
                 continue
             pair = [p.rstrip() for p in line.split('=', 1)]
-            if len(pair) !=2:
+            if len(pair) != 2:
                 continue
             name, value = pair
             cv_rh_config[name.upper()] = value
 
-    return cv_rh_config 
+    return cv_rh_config
+
 
 def _parse_ethtool_opts(opts, iface):
     '''
@@ -162,9 +175,9 @@ def _parse_settings_bond(opts, iface):
         # 0 for stable (default)
         # 1 for bandwidth
         # 2 for count
-        'ad_select' : '0',
+        'ad_select': '0',
         # Max number of transmit queues (default = 16)
-        'tx_queues' : '16',
+        'tx_queues': '16',
         # Link monitoring in milliseconds. Most NICs support this
         'miimon': '100',
         # arp interval in milliseconds
@@ -189,25 +202,46 @@ def _parse_settings_bond(opts, iface):
     }
 
     if opts['mode'] in ['balance-rr', '0']:
-        log.info('Device: {0} Bonding Mode: load balancing (round-robin)'.format(iface))
+        log.info(
+            'Device: {0} Bonding Mode: load balancing (round-robin)'.format(
+                iface
+            )
+        )
         return _parse_settings_bond_0(opts, iface, bond_def)
     elif opts['mode'] in ['active-backup', '1']:
-        log.info('Device: {0} Bonding Mode: fault-tolerance (active-backup)'.format(iface))
+        log.info(
+            'Device: {0} Bonding Mode: fault-tolerance (active-backup)'.format(
+                iface
+            )
+        )
         return _parse_settings_bond_1(opts, iface, bond_def)
     elif opts['mode'] in ['balance-xor', '2']:
-        log.info('Device: {0} Bonding Mode: load balancing (xor)'.format(iface))
+        log.info(
+            'Device: {0} Bonding Mode: load balancing (xor)'.format(iface)
+        )
         return _parse_settings_bond_2(opts, iface, bond_def)
     elif opts['mode'] in ['broadcast', '3']:
-        log.info('Device: {0} Bonding Mode: fault-tolerance (broadcast)'.format(iface))
+        log.info(
+            'Device: {0} Bonding Mode: fault-tolerance (broadcast)'.format(
+                iface
+            )
+        )
         return _parse_settings_bond_3(opts, iface, bond_def)
     elif opts['mode'] in ['802.3ad', '4']:
-        log.info('Device: {0} Bonding Mode: IEEE 802.3ad Dynamic link aggregation'.format(iface))
+        log.info(
+            'Device: {0} Bonding Mode: IEEE 802.3ad Dynamic link '
+            'aggregation'.format(iface)
+        )
         return _parse_settings_bond_4(opts, iface, bond_def)
     elif opts['mode'] in ['balance-tlb', '5']:
-        log.info('Device: {0} Bonding Mode: transmit load balancing'.format(iface))
+        log.info(
+            'Device: {0} Bonding Mode: transmit load balancing'.format(iface)
+        )
         return _parse_settings_bond_5(opts, iface, bond_def)
     elif opts['mode'] in ['balance-alb', '6']:
-        log.info('Device: {0} Bonding Mode: adaptive load balancing'.format(iface))
+        log.info(
+            'Device: {0} Bonding Mode: adaptive load balancing'.format(iface)
+        )
         return _parse_settings_bond_6(opts, iface, bond_def)
     else:
         valid = [
@@ -231,10 +265,9 @@ def _parse_settings_bond_0(opts, iface, bond_def):
     valid = ['list of ips (up to 16)']
     if 'arp_ip_target' in opts:
         if isinstance(opts['arp_ip_target'], list):
-            target_length = len(opts['arp_ip_target'])
             if 1 <= len(opts['arp_ip_target']) <= 16:
                 bond.update({'arp_ip_target': []})
-                for ip in opts['arp_ip_target']:
+                for ip in opts['arp_ip_target']:  # pylint: disable-msg=C0103
                     bond['arp_ip_target'].append(ip)
             else:
                 _raise_error_iface(iface, 'arp_ip_target', valid)
@@ -266,16 +299,16 @@ def _parse_settings_bond_1(opts, iface, bond_def):
     '''
     bond = {'mode': '1'}
 
-    for bo in ['miimon', 'downdelay', 'updelay']:
-        if bo in opts:
+    for binding in ['miimon', 'downdelay', 'updelay']:
+        if binding in opts:
             try:
-                int(opts[bo])
-                bond.update({bo: opts[bo]})
+                int(opts[binding])
+                bond.update({binding: opts[binding]})
             except Exception:
-                _raise_error_iface(iface, bo, ['integer'])
+                _raise_error_iface(iface, binding, ['integer'])
         else:
-            _log_default_iface(iface, bo, bond_def[bo])
-            bond.update({bo: bond_def[bo]})
+            _log_default_iface(iface, binding, bond_def[binding])
+            bond.update({binding: bond_def[binding]})
 
     if 'use_carrier' in opts:
         if opts['use_carrier'] in _CONFIG_TRUE:
@@ -307,7 +340,7 @@ def _parse_settings_bond_2(opts, iface, bond_def):
         if isinstance(opts['arp_ip_target'], list):
             if 1 <= len(opts['arp_ip_target']) <= 16:
                 bond.update({'arp_ip_target': []})
-                for ip in opts['arp_ip_target']:
+                for ip in opts['arp_ip_target']:  # pylint: disable-msg=C0103
                     bond['arp_ip_target'].append(ip)
             else:
                 _raise_error_iface(iface, 'arp_ip_target', valid)
@@ -349,16 +382,16 @@ def _parse_settings_bond_3(opts, iface, bond_def):
     '''
     bond = {'mode': '3'}
 
-    for bo in ['miimon', 'downdelay', 'updelay']:
-        if bo in opts:
+    for binding in ['miimon', 'downdelay', 'updelay']:
+        if binding in opts:
             try:
-                int(opts[bo])
-                bond.update({bo: opts[bo]})
+                int(opts[binding])
+                bond.update({binding: opts[binding]})
             except Exception:
-                _raise_error_iface(iface, bo, ['interger'])
+                _raise_error_iface(iface, binding, ['interger'])
         else:
-            _log_default_iface(iface, bo, bond_def[bo])
-            bond.update({bo: bond_def[bo]})
+            _log_default_iface(iface, binding, bond_def[binding])
+            bond.update({binding: bond_def[binding]})
 
     if 'use_carrier' in opts:
         if opts['use_carrier'] in _CONFIG_TRUE:
@@ -385,24 +418,24 @@ def _parse_settings_bond_4(opts, iface, bond_def):
 
     bond = {'mode': '4'}
 
-    for bo in ['miimon', 'downdelay', 'updelay', 'lacp_rate', 'ad_select']:
-        if bo in opts:
-            if bo == 'lacp_rate':
-                if opts[bo] == 'fast':
-                    opts.update({bo: '1'})
-                if opts[bo] == 'slow':
-                    opts.update({bo: '0'})
+    for binding in ['miimon', 'downdelay', 'updelay', 'lacp_rate', 'ad_select']:
+        if binding in opts:
+            if binding == 'lacp_rate':
+                if opts[binding] == 'fast':
+                    opts.update({binding: '1'})
+                if opts[binding] == 'slow':
+                    opts.update({binding: '0'})
                 valid = ['fast', '1', 'slow', '0']
             else:
                 valid = ['integer']
             try:
-                int(opts[bo])
-                bond.update({bo: opts[bo]})
+                int(opts[binding])
+                bond.update({binding: opts[binding]})
             except Exception:
-                _raise_error_iface(iface, bo, valid)
+                _raise_error_iface(iface, binding, valid)
         else:
-            _log_default_iface(iface, bo, bond_def[bo])
-            bond.update({bo: bond_def[bo]})
+            _log_default_iface(iface, binding, bond_def[binding])
+            bond.update({binding: bond_def[binding]})
 
     if 'use_carrier' in opts:
         if opts['use_carrier'] in _CONFIG_TRUE:
@@ -436,16 +469,16 @@ def _parse_settings_bond_5(opts, iface, bond_def):
     '''
     bond = {'mode': '5'}
 
-    for bo in ['miimon', 'downdelay', 'updelay']:
-        if bo in opts:
+    for binding in ['miimon', 'downdelay', 'updelay']:
+        if binding in opts:
             try:
-                int(opts[bo])
-                bond.update({bo: opts[bo]})
+                int(opts[binding])
+                bond.update({binding: opts[binding]})
             except Exception:
-                _raise_error_iface(iface, bo, ['integer'])
+                _raise_error_iface(iface, binding, ['integer'])
         else:
-            _log_default_iface(iface, bo, bond_def[bo])
-            bond.update({bo: bond_def[bo]})
+            _log_default_iface(iface, binding, bond_def[binding])
+            bond.update({binding: bond_def[binding]})
 
     if 'use_carrier' in opts:
         if opts['use_carrier'] in _CONFIG_TRUE:
@@ -472,16 +505,16 @@ def _parse_settings_bond_6(opts, iface, bond_def):
     '''
     bond = {'mode': '6'}
 
-    for bo in ['miimon', 'downdelay', 'updelay']:
-        if bo in opts:
+    for binding in ['miimon', 'downdelay', 'updelay']:
+        if binding in opts:
             try:
-                int(opts[bo])
-                bond.update({bo: opts[bo]})
+                int(opts[binding])
+                bond.update({binding: opts[binding]})
             except Exception:
-                _raise_error_iface(iface, bo, ['integer'])
+                _raise_error_iface(iface, binding, ['integer'])
         else:
-            _log_default_iface(iface, bo, bond_def[bo])
-            bond.update({bo: bond_def[bo]})
+            _log_default_iface(iface, binding, bond_def[binding])
+            bond.update({binding: bond_def[binding]})
 
     if 'use_carrier' in opts:
         if opts['use_carrier'] in _CONFIG_TRUE:
@@ -514,7 +547,7 @@ def _parse_settings_eth(opts, iface_type, enabled, iface):
     if 'dns' in opts:
         result['dns'] = opts['dns']
         result['peernds'] = 'yes'
-    
+
     if iface_type not in ['bridge']:
         ethtool = _parse_ethtool_opts(opts, iface)
         if ethtool:
@@ -578,7 +611,10 @@ def _parse_settings_eth(opts, iface_type, enabled, iface):
                 _raise_error_iface(iface, opts[opt], valid)
 
     if 'onboot' in opts:
-        log.warning('''The 'onboot' option is controlled by the 'enabled' option. Interface: {0} Enabled: {1}'''.format(iface, enabled))
+        log.warning(
+            'The \'onboot\' option is controlled by the \'enabled\' option. '
+            'Interface: {0} Enabled: {1}'.format(iface, enabled)
+        )
 
     if enabled:
         result['onboot'] = 'yes'
@@ -600,14 +636,15 @@ def _parse_settings_eth(opts, iface_type, enabled, iface):
 
     return result
 
+
 def _parse_network_settings(opts, current):
     '''
     Filters given options and outputs valid settings for
     the global network settings file.
     '''
     # Normalize keys
-    opts = dict((k.lower(), v) for k,v in opts.iteritems())
-    current = dict((k.lower(), v) for k,v in current.iteritems())
+    opts = dict((k.lower(), v) for (k, v) in opts.iteritems())
+    current = dict((k.lower(), v) for (k, v) in current.iteritems())
     result = {}
 
     valid = _CONFIG_TRUE + _CONFIG_FALSE
@@ -622,7 +659,7 @@ def _parse_network_settings(opts, current):
         if opts['networking'] in _CONFIG_TRUE:
             result['networking'] = 'yes'
         elif opts['networking'] in _CONFIG_FALSE:
-                result['networking'] = 'no'
+            result['networking'] = 'no'
     else:
         _raise_error_network('networking', valid)
 
@@ -643,14 +680,13 @@ def _parse_network_settings(opts, current):
             if opts['nozeroconf'] in _CONFIG_TRUE:
                 result['nozeroconf'] = 'true'
             elif opts['nozeroconf'] in _CONFIG_FALSE:
-                    result['nozeroconf'] = 'false'
+                result['nozeroconf'] = 'false'
         else:
             _raise_error_network('nozeroconf', valid)
 
     for opt in opts:
         if opt not in ['networking', 'hostname', 'nozeroconf']:
-          result[opt] = opts[opt]
-
+            result[opt] = opts[opt]
     return result
 
 
@@ -661,6 +697,7 @@ def _raise_error_iface(iface, option, expected):
     msg = _error_msg_iface(iface, option, expected)
     log.error(msg)
     raise AttributeError(msg)
+
 
 def _raise_error_network(option, expected):
     '''
@@ -676,7 +713,7 @@ def _read_file(path):
     Reads and returns the contents of a file
     '''
     try:
-        with open(path, 'rb') as contents:
+        with salt.utils.fopen(path, 'rb') as contents:
             return contents.readlines()
     except Exception:
         return ''
@@ -686,23 +723,25 @@ def _write_file_iface(iface, data, folder, pattern):
     '''
     Writes a file to disk
     '''
-    filename = join(folder, pattern.format(iface))
-    if not exists(folder):
-        msg = '{0} cannot be written. {1} does not exists'
+    filename = os.path.join(folder, pattern.format(iface))
+    if not os.path.exists(folder):
+        msg = '{0} cannot be written. {1} does not exist'
         msg = msg.format(filename, folder)
         log.error(msg)
         raise AttributeError(msg)
-    fout = open(filename, 'w')
+    fout = salt.utils.fopen(filename, 'w')
     fout.write(data)
     fout.close()
+
 
 def _write_file_network(data, filename):
     '''
     Writes a file to disk
     '''
-    fout = open(filename, 'w')
+    fout = salt.utils.fopen(filename, 'w')
     fout.write(data)
     fout.close()
+
 
 def _read_temp(data):
     tout = StringIO.StringIO()
@@ -723,16 +762,23 @@ def build_bond(iface, settings):
         salt '*' ip.build_bond bond0 mode=balance-alb
     '''
     rh_major = __grains__['osrelease'][:1]
-    rh_minor = __grains__['osrelease'][2:]
 
     opts = _parse_settings_bond(settings, iface)
-    template = env.get_template('conf.jinja')
+    try:
+        template = ENV.get_template('conf.jinja')
+    except TemplateNotFound:
+        log.error('Could not load template conf.jinja')
+        return ''
     data = template.render({'name': iface, 'bonding': opts})
     _write_file_iface(iface, data, _RH_NETWORK_CONF_FILES, '{0}.conf')
-    path = join(_RH_NETWORK_CONF_FILES, '{0}.conf'.format(iface))
+    path = os.path.join(_RH_NETWORK_CONF_FILES, '{0}.conf'.format(iface))
     if rh_major == '5':
-        __salt__['cmd.run']('sed -i -e "/^alias\s{0}.*/d" /etc/modprobe.conf'.format(iface))
-        __salt__['cmd.run']('sed -i -e "/^options\s{0}.*/d" /etc/modprobe.conf'.format(iface))
+        __salt__['cmd.run'](
+            'sed -i -e "/^alias\s{0}.*/d" /etc/modprobe.conf'.format(iface)
+        )
+        __salt__['cmd.run'](
+            'sed -i -e "/^options\s{0}.*/d" /etc/modprobe.conf'.format(iface)
+        )
         __salt__['cmd.run']('cat {0} >> /etc/modprobe.conf'.format(path))
     __salt__['kmod.load']('bonding')
 
@@ -750,8 +796,10 @@ def build_interface(iface, iface_type, enabled, settings):
 
         salt '*' ip.build_interface eth0 eth <settings>
     '''
-    rh_major = __grains__['osrelease'][:1]
-    rh_minor = __grains__['osrelease'][2:]
+    if __grains__['os'] == 'Fedora':
+        rh_major = '6'
+    else:
+        rh_major = __grains__['osrelease'][:1]
 
     iface = iface.lower()
     iface_type = iface_type.lower()
@@ -774,14 +822,22 @@ def build_interface(iface, iface_type, enabled, settings):
 
     if iface_type in ['eth', 'bond', 'bridge', 'slave', 'vlan']:
         opts = _parse_settings_eth(settings, iface_type, enabled, iface)
-        template = env.get_template('rh{0}_eth.jinja'.format(rh_major))
+        try:
+            template = ENV.get_template('rh{0}_eth.jinja'.format(rh_major))
+        except TemplateNotFound:
+            log.error(
+                'Could not load template rh{0}_eth.jinja'.format(
+                    rh_major
+                )
+            )
+            return ''
         ifcfg = template.render(opts)
 
     if settings['test']:
         return _read_temp(ifcfg)
 
     _write_file_iface(iface, ifcfg, _RH_NETWORK_SCRIPT_DIR, 'ifcfg-{0}')
-    path = join(_RH_NETWORK_SCRIPT_DIR, 'ifcfg-{0}'.format(iface))
+    path = os.path.join(_RH_NETWORK_SCRIPT_DIR, 'ifcfg-{0}'.format(iface))
 
     return _read_file(path)
 
@@ -808,7 +864,7 @@ def get_bond(iface):
 
         salt '*' ip.get_bond bond0
     '''
-    path = join(_RH_NETWORK_CONF_FILES, '{0}.conf'.format(iface))
+    path = os.path.join(_RH_NETWORK_CONF_FILES, '{0}.conf'.format(iface))
     return _read_file(path)
 
 
@@ -820,11 +876,11 @@ def get_interface(iface):
 
         salt '*' ip.get_interface eth0
     '''
-    path = join(_RH_NETWORK_SCRIPT_DIR, 'ifcfg-{0}'.format(iface))
+    path = os.path.join(_RH_NETWORK_SCRIPT_DIR, 'ifcfg-{0}'.format(iface))
     return _read_file(path)
 
 
-def up(iface, iface_type, opts):
+def up(iface, iface_type, opts):  # pylint: disable-msg=C0103
     '''
     Start up a network interface
 
@@ -861,10 +917,14 @@ def apply_network_settings(opts):
         opts['require_reboot'] = False
 
     if opts['require_reboot'] in _CONFIG_TRUE:
-        log.warning('The network state sls is requiring a reboot of the system to properly apply network configuration.')
+        log.warning(
+            'The network state sls is requiring a reboot of the system to '
+            'properly apply network configuration.'
+        )
         return True
     else:
         return __salt__['service.restart']('network')
+
 
 def build_network_settings(settings):
     '''
@@ -878,10 +938,14 @@ def build_network_settings(settings):
     current_network_settings = _parse_rh_config(_RH_NETWORK_FILE)
 
     # Build settings
-    opts = _parse_network_settings(settings,current_network_settings)
-    template = env.get_template('network.jinja')
+    opts = _parse_network_settings(settings, current_network_settings)
+    try:
+        template = ENV.get_template('network.jinja')
+    except TemplateNotFound:
+        log.error('Could not load template network.jinja')
+        return ''
     network = template.render(opts)
-    
+
     if settings['test']:
         return _read_temp(network)
 

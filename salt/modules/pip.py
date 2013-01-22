@@ -2,8 +2,22 @@
 Install Python packages with pip to either the system or a virtualenv
 '''
 
+# Import python libs
 import os
-from salt.exceptions import CommandExecutionError
+import logging
+import shutil
+
+# Import salt libs
+import salt.utils
+from salt._compat import string_types
+from salt.exceptions import CommandExecutionError, CommandNotFoundError
+
+# It would be cool if we could use __virtual__() in this module, though, since
+# pip can be installed on a virtualenv anywhere on the filesystem, there's no
+# definite way to tell if pip is installed on not.
+
+logger = logging.getLogger(__name__)  # pylint: disable-msg=C0103
+
 
 def _get_pip_bin(bin_env):
     '''
@@ -11,13 +25,18 @@ def _get_pip_bin(bin_env):
     passed in, or from the global modules options
     '''
     if not bin_env:
-        return __salt__['cmd.which_bin'](['pip2', 'pip', 'pip-python'])
+        which_result = __salt__['cmd.which_bin'](['pip2', 'pip', 'pip-python'])
+        if which_result is None:
+            raise CommandNotFoundError('Could not find a `pip` binary')
+        return which_result
 
     # try to get pip bin from env
     if os.path.isdir(bin_env):
         pip_bin = os.path.join(bin_env, 'bin', 'pip')
         if os.path.isfile(pip_bin):
             return pip_bin
+        raise CommandNotFoundError('Could not find a `pip` binary')
+
     return bin_env
 
 
@@ -47,7 +66,8 @@ def install(pkgs=None,
             no_download=False,
             install_options=None,
             runas=None,
-            cwd=None):
+            cwd=None,
+            __env__='base'):
     '''
     Install packages with pip
 
@@ -157,20 +177,46 @@ def install(pkgs=None,
         cmd = '{cmd} {pkg} '.format(
             cmd=cmd, pkg=pkg)
 
+    treq = None
     if requirements:
         if requirements.startswith('salt://'):
-            requirements = __salt__['cp.cache_file'](requirements)
-            __salt__['cmd.run']('cp -f {file} /tmp/requirements.txt'.format(file=requirements))
-            requirements = '/tmp/requirements.txt'
+            # If being called from state.virtualenv, the requirements file
+            # should already be cached, let's try to use that one
+            req = __salt__['cp.is_cached'](requirements, __env__)
+            if not req:
+                # It's not cached, let's cache it.
+                req = __salt__['cp.cache_file'](requirements, __env__)
+
+            if not req:
+                return {
+                    'result': False,
+                    'comment': (
+                        'pip requirements file \'{0}\' not found'.format(
+                            requirements
+                        )
+                    )
+                }
+
+            treq = salt.utils.mkstemp()
+            shutil.copyfile(req, treq)
+        else:
+            treq = requirements
         cmd = '{cmd} --requirement "{requirements}" '.format(
-            cmd=cmd, requirements=requirements)
+            cmd=cmd, requirements=treq or requirements)
+
+    if treq is not None and runas:
+        logger.debug(
+            'Changing ownership of requirements file \'{0}\' to '
+            'user \'{1}\''.format(treq, runas)
+        )
+        __salt__['file.chown'](treq, runas, None)
 
     if log:
         try:
             # TODO make this check if writeable
             os.path.exists(log)
         except IOError:
-            raise IOError("'%s' is not writeable" % log)
+            raise IOError('\'{0}\' is not writeable'.format(log))
         cmd = '{cmd} --log {log} '.format(
             cmd=cmd, log=log)
 
@@ -182,7 +228,9 @@ def install(pkgs=None,
         try:
             int(timeout)
         except ValueError:
-            raise ValueError("'%s' is not a valid integer base 10.")
+            raise ValueError(
+                '\'{0}\' is not a valid integer base 10.'.format(timeout)
+            )
         cmd = '{cmd} --timeout={timeout} '.format(
             cmd=cmd, timeout=timeout)
 
@@ -194,20 +242,22 @@ def install(pkgs=None,
 
     if find_links:
         if not find_links.startswith("http://"):
-            raise Exception("'%s' must be a valid url" % find_links)
+            raise Exception('\'{0}\' must be a valid url'.format(find_links))
         cmd = '{cmd} --find-links={find_links}'.format(
             cmd=cmd, find_links=find_links)
 
     if index_url:
         if not index_url.startswith("http://"):
-            raise Exception("'%s' must be a valid url" % index_url)
+            raise Exception('\'{0}\' must be a valid url'.format(index_url))
         cmd = '{cmd} --index-url="{index_url}" '.format(
             cmd=cmd, index_url=index_url)
 
     if extra_index_url:
         if not extra_index_url.startswith("http://"):
-            raise Exception("'%s' must be a valid url" % extra_index_url)
-        cmd = '{cmd} --extra-index_url="{extra_index_url}" '.format(
+            raise Exception(
+                '\'{0}\' must be a valid url'.format(extra_index_url)
+            )
+        cmd = '{cmd} --extra-index-url="{extra_index_url}" '.format(
             cmd=cmd, extra_index_url=extra_index_url)
 
     if no_index:
@@ -215,7 +265,7 @@ def install(pkgs=None,
 
     if mirrors:
         if not mirrors.startswith("http://"):
-            raise Exception("'%s' must be a valid url" % mirrors)
+            raise Exception('\'{0}\' must be a valid url'.format(mirrors))
         cmd = '{cmd} --use-mirrors --mirrors={mirrors} '.format(
             cmd=cmd, mirrors=mirrors)
 
@@ -232,7 +282,7 @@ def install(pkgs=None,
             cmd=cmd, download=download)
 
     if download_cache:
-        cmd = '{cmd} --download_cache={download_cache} '.format(
+        cmd = '{cmd} --download-cache={download_cache} '.format(
             cmd=cmd, download_cache=download_cache)
 
     if source:
@@ -258,12 +308,24 @@ def install(pkgs=None,
         cmd = '{cmd} --no-download '.format(cmd=cmd)
 
     if install_options:
-        cmd = '{cmd} --install-options={install_options} '.format(
-            cmd=cmd, install_options=install_options)
+        opts = ''
 
-    result = __salt__['cmd.run'](cmd, runas=runas, cwd=cwd)
+        if isinstance(install_options, string_types):
+            install_options = [install_options]
 
-    __salt__['cmd.run']('rm -f /tmp/requirements.txt')
+        for opt in install_options:
+            opts += '--install-option={opt} '.format(opt=opt)
+
+        cmd = '{cmd} {opts} '.format(cmd=cmd, opts=opts)
+
+    try:
+        result = __salt__['cmd.run_all'](cmd, runas=runas, cwd=cwd)
+    finally:
+        if treq and requirements.startswith('salt://'):
+            try:
+                os.remove(treq)
+            except Exception:
+                pass
 
     return result
 
@@ -275,7 +337,8 @@ def uninstall(pkgs=None,
               proxy=None,
               timeout=None,
               runas=None,
-              cwd=None):
+              cwd=None,
+              __env__='base'):
     '''
     Uninstall packages with pip
 
@@ -326,20 +389,21 @@ def uninstall(pkgs=None,
         cmd = '{cmd} {pkg} '.format(
             cmd=cmd, pkg=pkg)
 
+    treq = None
     if requirements:
         if requirements.startswith('salt://'):
-            requirements = __salt__['cp.cache_file'](requirements)
-            __salt__['cmd.run']('cp -f {file} /tmp/requirements.txt'.format(file=requirements))
-            requirements = '/tmp/requirements.txt'
+            req = __salt__['cp.cache_file'](requirements, __env__)
+            treq = salt.utils.mkstemp()
+            shutil.copyfile(req, treq)
         cmd = '{cmd} --requirements "{requirements}" '.format(
-            cmd=cmd, requirements=requirements)
+            cmd=cmd, requirements=treq or requirements)
 
     if log:
         try:
             # TODO make this check if writeable
             os.path.exists(log)
         except IOError:
-            raise IOError("'%s' is not writeable" % log)
+            raise IOError('\'{0}\' is not writeable'.format(log))
         cmd = '{cmd} --{log} '.format(
             cmd=cmd, log=log)
 
@@ -351,13 +415,19 @@ def uninstall(pkgs=None,
         try:
             int(timeout)
         except ValueError:
-            raise ValueError("'%s' is not a valid integer base 10.")
+            raise ValueError(
+                '\'{0}\' is not a valid integer base 10.'.format(timeout)
+            )
         cmd = '{cmd} --timeout={timeout} '.format(
             cmd=cmd, timeout=timeout)
 
-    result = __salt__['cmd.run'](cmd, runas=runas, cwd=cwd).split('\n')
+    result = __salt__['cmd.run_all'](cmd, runas=runas, cwd=cwd)
 
-    __salt__['cmd.run']('rm -f /tmp/requirements.txt')
+    if treq and requirements.startswith('salt://'):
+        try:
+            os.remove(treq)
+        except Exception:
+            pass
 
     return result
 
@@ -386,14 +456,23 @@ def freeze(bin_env=None,
     '''
 
     pip_bin = _get_pip_bin(bin_env)
+
     activate = os.path.join(os.path.dirname(pip_bin), 'activate')
     if not os.path.isfile(activate):
         raise CommandExecutionError(
             "Could not find the path to the virtualenv's 'activate' binary"
         )
 
-    cmd = 'source {0}; {1} freeze'.format(activate, pip_bin)
-    return __salt__['cmd.run'](cmd, runas=runas, cwd=cwd).split('\n')
+    # We use dot(.) instead of source because it's apparently the better and/or
+    # more supported way to source files on the various "major" linux shells.
+    cmd = '. {0}; {1} freeze'.format(activate, pip_bin)
+
+    result = __salt__['cmd.run_all'](cmd, runas=runas, cwd=cwd)
+
+    if result['retcode'] > 0:
+        raise CommandExecutionError(result['stderr'])
+
+    return result['stdout'].splitlines()
 
 
 def list(prefix='',
@@ -401,27 +480,33 @@ def list(prefix='',
          runas=None,
          cwd=None):
     '''
-    Filter list of instaslled apps from ``freeze`` and check to see if ``prefix``
-    exists in the list of packages installed.
+    Filter list of installed apps from ``freeze`` and check to see if
+    ``prefix`` exists in the list of packages installed.
 
     CLI Example::
 
         salt '*' pip.list salt
     '''
     packages = {}
+
     cmd = '{0} freeze'.format(_get_pip_bin(bin_env))
-    for line in __salt__['cmd.run'](cmd, runas=runas, cwd=cwd).split("\n"):
+
+    result = __salt__['cmd.run_all'](cmd, runas=runas, cwd=cwd)
+    if result['retcode'] > 0:
+        raise CommandExecutionError(result['stderr'])
+
+    for line in result['stdout'].splitlines():
         if line.startswith('-e'):
             line = line.split('-e ')[1]
             line, name = line.split('#egg=')
-            packages[name]=line
+            packages[name] = line
 
         elif len(line.split("==")) >= 2:
             name = line.split("==")[0]
             version = line.split("==")[1]
             if prefix:
                 if line.lower().startswith(prefix.lower()):
-                    packages[name]=version
+                    packages[name] = version
             else:
-                packages[name]=version
+                packages[name] = version
     return packages

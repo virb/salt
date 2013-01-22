@@ -2,8 +2,13 @@
 Salt module to manage RAID arrays with mdadm
 '''
 
+# Import python libs
+import os
 import logging
 
+# Import salt libs
+import salt.utils
+from salt.exceptions import CommandExecutionError
 
 # Set up logger
 log = logging.getLogger(__name__)
@@ -13,7 +18,11 @@ def __virtual__():
     '''
     mdadm provides raid functions for Linux
     '''
-    return 'raid' if __grains__['kernel'] == 'Linux' else False
+    if not __grains__['kernel'] == 'Linux':
+        return False
+    if not salt.utils.which('mdadm'):
+        return False
+    return 'raid'
 
 
 def list():
@@ -26,7 +35,7 @@ def list():
     '''
     ret = {}
     for line in (__salt__['cmd.run_stdout']
-                 ('mdadm --detail --scan').split('\n')):
+                 ('mdadm --detail --scan').splitlines()):
         if ' ' not in line:
             continue
         comps = line.split()
@@ -49,8 +58,14 @@ def detail(device='/dev/md0'):
     '''
     ret = {}
     ret['members'] = {}
-    cmd = 'mdadm --detail %s' % device
-    for line in __salt__['cmd.run_stdout'](cmd).split('\n'):
+
+    # Lets make sure the device exists before running mdadm
+    if not os.path.exists(device):
+        msg = "Device {0} doesn't exist!"
+        raise CommandExecutionError(msg.format(device))
+
+    cmd = 'mdadm --detail {0}'.format(device)
+    for line in __salt__['cmd.run_stdout'](cmd).splitlines():
         if line.startswith(device):
             continue
         if ' ' not in line:

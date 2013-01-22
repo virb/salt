@@ -17,6 +17,7 @@ import yaml
 # Set up logging
 log = logging.getLogger(__name__)
 
+
 def __virtual__():
     '''
     Only return if hiera is installed
@@ -24,7 +25,7 @@ def __virtual__():
     return 'hiera' if salt.utils.which('hiera') else False
 
 
-def ext_pillar(conf):
+def ext_pillar(pillar, conf):
     '''
     Execute hiera and return the data
     '''

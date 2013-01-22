@@ -8,24 +8,31 @@ Full Table of Contents
 
     topics/index
     topics/installation/index
-    topics/hacking
     topics/configuration
+    topics/hacking
     topics/targeting/index
     topics/tutorials/modules
     topics/tutorials/starting_states
     topics/tutorials/states*
+    topics/eauth/*
     topics/tutorials/firewall
     topics/tutorials/bootstrap_ec2
+    topics/tutorials/esky
     topics/tutorials/preseed_key
     topics/tutorials/standalone_minion
     topics/pillar/index
-    topics/jobs/index
+    topics/master_tops/index
+    topics/jobs/*
     topics/nonroot
     topics/troubleshooting/index
     topics/troubleshooting/yaml_idiosyncrasies
     topics/community
     topics/projects/index
     topics/event/index
+    topics/tests/*
+    topics/reactor/*
+    topics/style
+    topics/git/*
 
     ref/index
     ref/modules/*
@@ -36,14 +43,23 @@ Full Table of Contents
     ref/states/all/index
     ref/renderers/*
     ref/renderers/all/index
-    ref/runners
+    ref/pillar/*
+    ref/pillar/all/index
+    ref/tops/*
+    ref/tops/all/index
+    ref/runners/index
+    ref/runners/all/index
+    ref/wheel/all/index
+    ref/output/all/index
+    ref/clients/index
     ref/peer
+    ref/clientacl
     ref/syndic
     ref/python-api
-    ref/file_server/index
-    ref/file_server/file_roots
-    ref/file_server/dynamic-modules
+    ref/file_server/*
     ref/configuration/*
+    ref/internals/index
+    ref/windows-package-manager
 
     ref/cli/index
     ref/cli/salt

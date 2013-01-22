@@ -11,6 +11,9 @@ A state module to manage system installed python packages
         - version: 3.0.1
 '''
 
+# Import salt libs
+from salt.exceptions import CommandExecutionError, CommandNotFoundError
+
 
 def installed(name,
               pip_bin=None,
@@ -20,6 +23,7 @@ def installed(name,
               log=None,
               proxy=None,
               timeout=None,
+              repo=None,
               editable=None,
               find_links=None,
               index_url=None,
@@ -39,7 +43,8 @@ def installed(name,
               no_download=False,
               install_options=None,
               user=None,
-              cwd=None):
+              cwd=None,
+              __env__='base'):
     '''
     Make sure the package is installed
 
@@ -59,10 +64,18 @@ def installed(name,
         bin_env = env
 
     ret = {'name': name, 'result': None, 'comment': '', 'changes': {}}
-    if name in __salt__['pip.list'](name, bin_env, runas=user, cwd=cwd):
-        ret['result'] = True
-        ret['comment'] = 'Package already installed'
+    try:
+        pip_list = __salt__['pip.list'](name, bin_env, runas=user, cwd=cwd)
+    except (CommandNotFoundError, CommandExecutionError) as err:
+        ret['result'] = False
+        ret['comment'] = 'Error installing \'{0}\': {1}'.format(name, err)
         return ret
+
+    if ignore_installed == False and name.lower() in (p.lower() for p in pip_list):
+        if force_reinstall == False and upgrade == False:
+            ret['result'] = True
+            ret['comment'] = 'Package already installed'
+            return ret
 
     if __opts__['test']:
         ret['result'] = None
@@ -70,38 +83,61 @@ def installed(name,
                 name)
         return ret
 
-    if __salt__['pip.install'](pkgs=name,
-                               requirements=requirements,
-                               bin_env=bin_env,
-                               log=log,
-                               proxy=proxy,
-                               timeout=timeout,
-                               editable=editable,
-                               find_links=find_links,
-                               index_url=index_url,
-                               extra_index_url=extra_index_url,
-                               no_index=no_index,
-                               mirrors=mirrors,
-                               build=build,
-                               target=target,
-                               download=download,
-                               download_cache=download_cache,
-                               source=source,
-                               upgrade=upgrade,
-                               force_reinstall=force_reinstall,
-                               ignore_installed=ignore_installed,
-                               no_deps=no_deps,
-                               no_install=no_install,
-                               no_download=no_download,
-                               install_options=install_options,
-                               runas=user,
-                               cwd=cwd):
+    if repo:
+        name = repo
+
+    pip_install_call = __salt__['pip.install'](
+        pkgs=name,
+        requirements=requirements,
+        bin_env=bin_env,
+        log=log,
+        proxy=proxy,
+        timeout=timeout,
+        editable=editable,
+        find_links=find_links,
+        index_url=index_url,
+        extra_index_url=extra_index_url,
+        no_index=no_index,
+        mirrors=mirrors,
+        build=build,
+        target=target,
+        download=download,
+        download_cache=download_cache,
+        source=source,
+        upgrade=upgrade,
+        force_reinstall=force_reinstall,
+        ignore_installed=ignore_installed,
+        no_deps=no_deps,
+        no_install=no_install,
+        no_download=no_download,
+        install_options=install_options,
+        runas=user,
+        cwd=cwd,
+        __env__=__env__
+    )
+
+    if pip_install_call and (pip_install_call['retcode'] == 0):
+        ret['result'] = True
+
         pkg_list = __salt__['pip.list'](name, bin_env, runas=user, cwd=cwd)
+        if not pkg_list:
+            ret['comment'] = (
+                'There was no error installing package \'{0}\' although '
+                'it does not show when calling \'pip.freeze\'.'.format(name)
+            )
+            ret['changes']["{0}==???".format(name)] = 'Installed'
+            return ret
+
         version = list(pkg_list.values())[0]
         pkg_name = next(iter(pkg_list))
-        ret['result'] = True
         ret['changes']["{0}=={1}".format(pkg_name, version)] = 'Installed'
         ret['comment'] = 'Package was successfully installed'
+    elif pip_install_call:
+        ret['result'] = False
+        ret['comment'] = ('Failed to install package {0}. '
+                          'Error: {1} {2}').format(name,
+                                                   pip_install_call['stdout'],
+                                                   pip_install_call['stderr'])
     else:
         ret['result'] = False
         ret['comment'] = 'Could not install package'
@@ -117,7 +153,8 @@ def removed(name,
             proxy=None,
             timeout=None,
             user=None,
-            cwd=None):
+            cwd=None,
+            __env__='base'):
     """
     Make sure that a package is not installed.
 
@@ -128,7 +165,15 @@ def removed(name,
     """
 
     ret = {'name': name, 'result': None, 'comment': '', 'changes': {}}
-    if name not in __salt__["pip.list"](bin_env=bin_env, runas=user, cwd=cwd):
+
+    try:
+        pip_list = __salt__["pip.list"](bin_env=bin_env, runas=user, cwd=cwd)
+    except (CommandExecutionError, CommandNotFoundError) as err:
+        ret['result'] = False
+        ret['comment'] = 'Error uninstalling \'{0}\': {1}'.format(name, err)
+        return ret
+
+    if name not in pip_list:
         ret["result"] = True
         ret["comment"] = "Package is not installed."
         return ret
@@ -145,7 +190,8 @@ def removed(name,
                                  proxy=proxy,
                                  timeout=timeout,
                                  runas=user,
-                                 cwd=cwd):
+                                 cwd=cwd,
+                                 __env__='base'):
         ret["result"] = True
         ret["changes"][name] = "Removed"
         ret["comment"] = "Package was successfully removed."

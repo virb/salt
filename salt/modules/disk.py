@@ -2,6 +2,7 @@
 Module for gathering disk information
 '''
 
+# Import python libs
 import logging
 
 log = logging.getLogger(__name__)
@@ -18,6 +19,7 @@ def __virtual__():
     if __grains__['os'] in disable:
         return False
     return 'disk'
+
 
 def usage(args=None):
     '''
@@ -36,7 +38,7 @@ def usage(args=None):
     if args:
         cmd = cmd + ' -' + args
     ret = {}
-    out = __salt__['cmd.run'](cmd).split('\n')
+    out = __salt__['cmd.run'](cmd).splitlines()
     for line in out:
         if not line:
             continue
@@ -56,6 +58,7 @@ def usage(args=None):
             ret = {}
     return ret
 
+
 def inodeusage(args=None):
     '''
     Return inode usage information for volumes mounted on this minion
@@ -68,7 +71,7 @@ def inodeusage(args=None):
     if args is not None:
         cmd = cmd + ' -' + args
     ret = {}
-    out = __salt__['cmd.run'](cmd).split('\n')
+    out = __salt__['cmd.run'](cmd).splitlines()
     for line in out:
         if line.startswith('Filesystem'):
             continue

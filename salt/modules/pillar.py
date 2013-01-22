@@ -2,8 +2,9 @@
 Extract the pillar data for this minion
 '''
 
-# Import Salt modules
+# Import salt libs
 import salt.pillar
+
 
 def data():
     '''
@@ -20,3 +21,15 @@ def data():
             __opts__['id'],
             __opts__['environment'])
     return pillar.compile_pillar()
+
+
+def raw():
+    '''
+    Return the raw pillar data that is available in the module. This will
+    show the pillar as it is loaded as the __pillar__ dict.
+
+    CLI Example::
+
+        salt '*' pillar.raw
+    '''
+    return __pillar__

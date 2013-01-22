@@ -2,29 +2,24 @@
 Module for gathering and managing network information
 '''
 
-import sys
+# Import python libs
 import logging
-from string import ascii_letters, digits
-from salt.utils.interfaces import *
-from salt.utils.socket_util import *
 
-__outputter__ = {
-    'dig':     'txt',
-    'ping':    'txt',
-    'netstat': 'txt',
-}
+# Import salt libs
+from salt.utils.socket_util import sanitize_host
+
 
 log = logging.getLogger(__name__)
+
 
 def __virtual__():
     '''
     Only work on posix-like systems
     '''
-
     # Disable on Windows, a specific file module exists:
     if __grains__['os'] in ('Windows',):
         return False
-    setattr(sys.modules['salt.utils.interfaces'], 'interfaces', interfaces)
+
     return 'network'
 
 
@@ -33,19 +28,19 @@ def _cidr_to_ipv4_netmask(cidr_bits):
     Returns an IPv4 netmask
     '''
     netmask = ''
-    for n in range(4):
-        if n:
+    for idx in range(4):
+        if idx:
             netmask += '.'
         if cidr_bits >= 8:
             netmask += '255'
             cidr_bits -= 8
         else:
-            netmask += '%d' % (256-(2**(8-cidr_bits)))
+            netmask += '{0:d}'.format(256 - (2 ** (8 - cidr_bits)))
             cidr_bits = 0
     return netmask
 
 
-def _number_of_set_bits_to_ipv4_netmask(set_bits):
+def _number_of_set_bits_to_ipv4_netmask(set_bits):  # pylint: disable-msg=C0103
     '''
     Returns an IPv4 netmask from the integer representation of that mask.
 
@@ -54,6 +49,7 @@ def _number_of_set_bits_to_ipv4_netmask(set_bits):
     return _cidr_to_ipv4_netmask(_number_of_set_bits(set_bits))
 
 
+# pylint: disable-msg=C0103
 def _number_of_set_bits(x):
     '''
     Returns the number of bits that are set in a 32bit int
@@ -65,6 +61,8 @@ def _number_of_set_bits(x):
     x += x >> 8
     x += x >> 16
     return x & 0x0000003f
+
+# pylint: enable-msg=C0103
 
 
 def _interfaces_ip(out):
@@ -82,15 +80,15 @@ def _interfaces_ip(out):
         '''
         brd = None
         if '/' in value:  # we have a CIDR in this address
-            ip, cidr = value.split('/')
+            ip, cidr = value.split('/')  # pylint: disable-msg=C0103
         else:
-            ip = value
+            ip = value  # pylint: disable-msg=C0103
             cidr = 32
 
         if type == 'inet':
             mask = _cidr_to_ipv4_netmask(int(cidr))
             if 'brd' in cols:
-                brd = cols[cols.index('brd')+1]
+                brd = cols[cols.index('brd') + 1]
         elif type == 'inet6':
             mask = cidr
         return (ip, mask, brd)
@@ -100,12 +98,12 @@ def _interfaces_ip(out):
         iface = None
         data = dict()
 
-        for line in group.split('\n'):
+        for line in group.splitlines():
             if not ' ' in line:
                 continue
-            m = re.match('^\d*:\s+([\w.]+)(?:@)?(\w+)?:\s+<(.+)>', line)
-            if m:
-                iface,parent,attrs = m.groups()
+            match = re.match('^\d*:\s+([\w.]+)(?:@)?(\w+)?:\s+<(.+)>', line)
+            if match:
+                iface, parent, attrs = match.groups()
                 if 'UP' in attrs.split(','):
                     data['up'] = True
                 else:
@@ -116,7 +114,8 @@ def _interfaces_ip(out):
 
             cols = line.split()
             if len(cols) >= 2:
-                type,value = tuple(cols[0:2])
+                type, value = tuple(cols[0:2])
+                iflabel = cols[-1:][0]
                 if type in ('inet', 'inet6'):
                     if 'secondary' not in cols:
                         ipaddr, netmask, broadcast = parse_network(value, cols)
@@ -127,6 +126,7 @@ def _interfaces_ip(out):
                             addr_obj['address'] = ipaddr
                             addr_obj['netmask'] = netmask
                             addr_obj['broadcast'] = broadcast
+                            addr_obj['label'] = iflabel
                             data['inet'].append(addr_obj)
                         elif type == 'inet6':
                             if 'inet6' not in data:
@@ -138,14 +138,15 @@ def _interfaces_ip(out):
                     else:
                         if 'secondary' not in data:
                             data['secondary'] = list()
-                        ip, mask, brd = parse_network(value, cols)
+                        ip_, mask, brd = parse_network(value, cols)
                         data['secondary'].append({
                             'type': type,
-                            'address': ip,
+                            'address': ip_,
                             'netmask': mask,
-                            'broadcast': brd
+                            'broadcast': brd,
+                            'label': iflabel,
                             })
-                        del ip, mask, brd
+                        del ip_, mask, brd
                 elif type.startswith('link'):
                     data['hwaddr'] = value
         if iface:
@@ -176,7 +177,7 @@ def _interfaces_ifconfig(out):
         data = dict()
         iface = ''
         updown = False
-        for line in group.split('\n'):
+        for line in group.splitlines():
             miface = piface.match(line)
             mmac = pmac.match(line)
             mip = pip.match(line)
@@ -221,21 +222,29 @@ def _interfaces_ifconfig(out):
 
 
 def interfaces():
+    '''
+    Return a dictionary of information about all the interfaces on the minion
+
+    CLI Example::
+
+        salt '*' network.interfaces
+    '''
     ifaces = dict()
     if __salt__['cmd.has_exec']('ip'):
-        cmd = __salt__['cmd.run']('ip addr show')
-        ifaces = _interfaces_ip(cmd)
+        cmd1 = __salt__['cmd.run']('ip link show')
+        cmd2 = __salt__['cmd.run']('ip addr show')
+        ifaces = _interfaces_ip(cmd1 + '\n' + cmd2)
     elif __salt__['cmd.has_exec']('ifconfig'):
         cmd = __salt__['cmd.run']('ifconfig -a')
         ifaces = _interfaces_ifconfig(cmd)
     return ifaces
 
 
-def _get_net_start(ipaddr,netmask):
+def _get_net_start(ipaddr, netmask):
     ipaddr_octets = ipaddr.split('.')
     netmask_octets = netmask.split('.')
     net_start_octets = [str(int(ipaddr_octets[x]) & int(netmask_octets[x]))
-                       for x in range(0,4)]
+                       for x in range(0, 4)]
     return '.'.join(net_start_octets)
 
 
@@ -246,8 +255,8 @@ def _get_net_size(mask):
     return len(binary_str.rstrip('0'))
 
 
-def _calculate_subnet(ipaddr,netmask):
-    return '{0}/{1}'.format(_get_net_start(ipaddr,netmask),
+def _calculate_subnet(ipaddr, netmask):
+    return '{0}/{1}'.format(_get_net_start(ipaddr, netmask),
                             _get_net_size(netmask))
 
 
@@ -256,7 +265,7 @@ def _ipv4_to_bits(ipaddr):
     Accepts an IPv4 dotted quad and returns a string representing its binary
     counterpart
     '''
-    return ''.join([bin(int(x))[2:].rjust(8,'0') for x in ipaddr.split('.')])
+    return ''.join([bin(int(x))[2:].rjust(8, '0') for x in ipaddr.split('.')])
 
 
 def subnets():
@@ -267,9 +276,10 @@ def subnets():
     subnets = []
 
     for ipv4_info in ifaces.values():
-        for ipv4 in ipv4_info.get('inet',[]):
-            if ipv4['address'] == '127.0.0.1': continue
-            network = _calculate_subnet(ipv4['address'],ipv4['netmask'])
+        for ipv4 in ipv4_info.get('inet', []):
+            if ipv4['address'] == '127.0.0.1':
+                continue
+            network = _calculate_subnet(ipv4['address'], ipv4['netmask'])
             subnets.append(network)
     return subnets
 
@@ -279,32 +289,75 @@ def in_subnet(cidr):
     Returns True if host is within specified subnet, otherwise False
     '''
     try:
-        netstart,netsize = cidr.split('/')
+        netstart, netsize = cidr.split('/')
         netsize = int(netsize)
     except:
         log.error('Invalid CIDR \'{0}\''.format(cidr))
         return False
 
-    ifaces = interfaces()
-
     netstart_bin = _ipv4_to_bits(netstart)
 
     if netsize < 32 and len(netstart_bin.rstrip('0')) > netsize:
         log.error('Invalid network starting IP \'{0}\' in CIDR '
-                  '\'{1}\''.format(netstart,cidr))
+                  '\'{1}\''.format(netstart, cidr))
         return False
 
     netstart_leftbits = netstart_bin[0:netsize]
-    for ipv4_info in ifaces.values():
-        for ipv4 in ipv4_info.get('inet',[]):
-            if ipv4['address'] == '127.0.0.1': continue
-            if netsize == 32:
-                if netstart == ipv4['address']: return True
-            else:
-                ip_leftbits = _ipv4_to_bits(ipv4['address'])[0:netsize]
-                if netstart_leftbits == ip_leftbits: return True
-
+    for ip_addr in ip_addrs():
+        if netsize == 32:
+            if netstart == ip_addr:
+                return True
+        else:
+            ip_leftbits = _ipv4_to_bits(ip_addr)[0:netsize]
+            if netstart_leftbits == ip_leftbits:
+                return True
     return False
+
+
+def ip_addrs(interface=None, include_loopback=False):
+    '''
+    Returns a list of IPv4 addresses assigned to the host. 127.0.0.1 is
+    ignored, unless 'include_loopback=True' is indicated. If 'interface' is
+    provided, then only IP addresses from that interface will be returned.
+    '''
+    ret = []
+    ifaces = interfaces()
+    if interface is None:
+        target_ifaces = ifaces
+    else:
+        target_ifaces = dict([(k, v) for k, v in ifaces.iteritems()
+                              if k == interface])
+        if not target_ifaces:
+            log.error('Interface {0} not found.'.format(interface))
+    for ipv4_info in target_ifaces.values():
+        for ipv4 in ipv4_info.get('inet', []):
+            if include_loopback \
+            or (not include_loopback and ipv4['address'] != '127.0.0.1'):
+                ret.append(ipv4['address'])
+    return ret
+
+
+def ip_addrs6(interface=None, include_loopback=False):
+    '''
+    Returns a list of IPv6 addresses assigned to the host. ::1 is ignored,
+    unless 'include_loopback=True' is indicated. If 'interface' is provided,
+    then only IP addresses from that interface will be returned.
+    '''
+    ret = []
+    ifaces = interfaces()
+    if interface is None:
+        target_ifaces = ifaces
+    else:
+        target_ifaces = dict([(k, v) for k, v in ifaces.iteritems()
+                              if k == interface])
+        if not target_ifaces:
+            log.error('Interface {0} not found.'.format(interface))
+    for ipv6_info in target_ifaces.values():
+        for ipv6 in ipv6_info.get('inet6', []):
+            if include_loopback \
+            or (not include_loopback and ipv6['address'] != '::1'):
+                ret.append(ipv6['address'])
+    return ret
 
 
 def ping(host):
@@ -315,7 +368,7 @@ def ping(host):
 
         salt '*' network.ping archlinux.org
     '''
-    cmd = 'ping -c 4 %s' % _sanitize_host(host)
+    cmd = 'ping -c 4 {0}'.format(sanitize_host(host))
     return __salt__['cmd.run'](cmd)
 
 
@@ -330,7 +383,7 @@ def netstat():
     '''
     ret = []
     cmd = 'netstat -tulpnea'
-    out = __salt__['cmd.run'](cmd).split('\n')
+    out = __salt__['cmd.run'](cmd).splitlines()
     for line in out:
         comps = line.split()
         if line.startswith('tcp'):
@@ -368,7 +421,7 @@ def traceroute(host):
         salt '*' network.traceroute archlinux.org
     '''
     ret = []
-    cmd = 'traceroute %s' % _sanitize_host(host)
+    cmd = 'traceroute {0}'.format(sanitize_host(host))
     out = __salt__['cmd.run'](cmd)
 
     for line in out:
@@ -399,7 +452,5 @@ def dig(host):
 
         salt '*' network.dig archlinux.org
     '''
-    cmd = 'dig %s' % _sanitize_host(host)
+    cmd = 'dig {0}'.format(sanitize_host(host))
     return __salt__['cmd.run'](cmd)
-
-

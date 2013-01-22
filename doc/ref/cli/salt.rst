@@ -13,8 +13,6 @@ Synopsis
 
     salt -C 'G@os:Arch.* and webserv* or G@kernel:FreeBSD' [ options ] test.ping
 
-    salt -Q test.ping
-
 Description
 ===========
 
@@ -49,9 +47,24 @@ Options
     an explicit number of minions to execute at once, or a percentage of
     minions to execute on.
 
+.. option:: -a EAUTH, --auth=EAUTH
+
+    Pass in an external authentication medium to validate against. The
+    credentials will be prompted for. Can be used with the -T option.
+
+.. option:: -T, --make-token
+
+    Used in conjunction with the -a option. This creates a token that allows
+    for the authenticated user to send commands without needing to
+    re-authenticate.
+
 .. option:: --version
 
     Print the version of Salt that is running.
+
+.. option:: --versions-report
+
+    Show program's dependencies version number and exit
 
 .. option:: -E, --pcre
 
@@ -94,7 +107,17 @@ Options
 .. option:: -N, --nodegroup
 
     Use a predefined compound target defined in the Salt master configuration
-    file
+    file.
+
+.. option:: -I, --pillar
+    
+    Instead of using shell globs to evaluate the target use a pillar value to
+    identify targets, the syntax for the target is the pillar key followed by
+    a glob expression: "role:production*"
+
+.. option:: -S, --ipcidr
+
+    Match based on Subnet (CIDR notation) or IPv4 address.
 
 .. option:: -R, --range
 
@@ -108,47 +131,40 @@ Options
 .. option:: --return
 
     Chose an alternative returner to call on the minion, if an alternative
-    returner is used then the return will not come back tot he command line
+    returner is used then the return will not come back to the command line
     but will be sent to the specified return system.
 
-.. option:: -Q, --query
+.. option:: -c CONFIG_DIR, --config-dir=CONFIG_dir
 
-    The -Q option is being deprecated and will be removed in version 0.9.9,
-    Use the Salt jobs interface instead, for documentation on the Salt jobs
-    interface execute the command "salt-run -d jobs"
-
-    Execute a salt command query, this can be used to find the results of a
-    previous function call: -Q test.echo')
-
-.. option:: -c CONFIG, --config=CONFIG
-
-    The location of the Salt master configuration file, the Salt master
-    settings are required to know where the connections are;
-    default=/etc/salt/master
+    The location of the Salt configuration directory, this directory contains
+    the configuration files for Salt master and minions. The default location
+    on most systems is /etc/salt.
 
 .. option:: -v VERBOSE, --verbose
 
     Turn on verbosity for the salt call, this will cause the salt command to
     print out extra data like the job id.
 
-.. option::  --raw-out
+.. option:: -d, --doc, --documentation
 
-    Print the output from the salt command in raw Python
-    form, this is suitable for re-reading the output into
-    an executing Python script with eval.
+    Return the documentation for the module functions available on the minions
 
-.. option::   --text-out
+.. option:: --out
 
-    Print the output from the salt command in the same
-    form the shell would.
+    Pass in an alternative outputter to display the return of data. This
+    outputter can be any of the available outputters:
+    grains, highstate, json, key, overstatestage, pprint, raw, txt, yaml
+    Some outputters are formatted only for data returned from specific
+    functions, for instance the grains outputter will not work for non grains
+    data.
+    If an outputter is used that does not support the data passed into it, then
+    Salt will fall back on the pprint outputter and display the return data
+    using the python pprint library.
 
-.. option::   --yaml-out
+.. option:: --out-indent OUTPUT_INDENT, --output-indent OUTPUT_INDENT
 
-    Print the output from the salt command in YAML.
-
-.. option::   --json-out
-
-    Print the output from the salt command in JSON.
+    Print the output indented by the provided value in spaces. Negative values
+    disables indentation. Only applicable in outputters that support indentation.
 
 .. option:: --no-color
 

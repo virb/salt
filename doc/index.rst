@@ -31,6 +31,15 @@ language.
 
 Read the :doc:`Salt overview <topics/index>` for a more thorough description.
 
+Salt (Masterless) Quickstart
+----------------------------
+
+Install salt-minion and provision a webserver in 3 easy steps. The fastest way to start
+using salt's configuration management.
+
+:doc:`Salt Quickstart </topics/tutorials/quickstart>`
+
+
 Tutorial 1: Remote execution
 ----------------------------
 
@@ -70,7 +79,6 @@ truly make it work for you.
 .. sidebar:: More tutorials!
 
     * :doc:`Bootstraping Salt on EC2 <topics/tutorials/bootstrap_ec2>`
-    * :doc:`Installing Salt on FreeBSD <topics/installation/freebsd>`
     * :doc:`Preseeding Minions with Accepted Keys <topics/tutorials/preseed_key>`
 
 .. contents:: The components of Salt
@@ -84,7 +92,7 @@ Targeting is specifying which minions should execute commands or manage server
 configuration.
 
 :doc:`Globbing and regex </topics/targeting/globbing>`
-    Match minions using globing and regular expressions.
+    Match minions using globbing and regular expressions.
 
 :doc:`Grains </topics/targeting/grains>`
     Match minions using bits of static information about the minion such as
@@ -158,8 +166,8 @@ effortless, simultaneous configuration of thousands of hosts.
     file type of your choice. The world doesn't need yet another DSL.
 
     :doc:`Full list of renderers <ref/renderers/all/index>`
-        YAML? JSON? Jinja? Mako? Python? We got you covered. (And if we
-        don't, new renderers are *tiny* and easy to write.)
+        YAML? JSON? Jinja? Mako? Wempy? Python? We got you covered. (And if
+        we don't, new renderers are *tiny* and easy to write.)
 
     :doc:`Renderers <ref/renderers/index>`
         Salt states are only concerned with the ultimate highstate data
@@ -191,15 +199,34 @@ Salt is many splendid things.
 :doc:`Firewall settings and Salt <topics/tutorials/firewall>`
     A tutorial covering how to properly firewall a Salt Master server.
 
+:doc:`Cron and Salt States <topics/tutorials/cron>`
+    A tutorial covering how to properly use cron to schedule when a 
+    minion updates its state.
+
 :doc:`Network topology <ref/topology>`
     At it's core, Salt is a highly scalable communication layer built on
     top of ZeroMQ that enables remote execution and configuration
     management. The possibilities are endless and Salt's future looks
     bright.
 
+:doc:`Testing Salt <topics/tests/index>`
+    A howto for writing unit tests and integration tests.
+
 :doc:`Python API interface <ref/python-api>`
     Use Salt programmatically from your own scripts and programs easily and
     simply via ``import salt``.
+
+:doc:`Automatic Updates and Frozen Binary Deployments <topics/tutorials/esky>`
+    Use a frozen install to make deployments easier (Even on Windows!). Or
+    take advantage of automatic updates to keep your minions running your
+    latest builds.
+
+:doc:`Windows Software Manager / Package Repository <ref/windows-package-manager>`
+    Looking for an easy way to manage software on all your Windows machines? Do
+    you feel left out of all the package manager magic found in yum and apt?
+    Search no more! Salt has an integrated software package manager for your
+    Windows machines! Install software hosted on your master, somewhere on your
+    network, or anywhere http, https, and ftp work.
 
 Reference
 ---------
@@ -224,6 +251,9 @@ More information about the project
 
 :doc:`Community </topics/community>`
     How you can get involved.
+
+:doc:`Salt Development </topics/development/index>`
+    Information for Hacking on Salt
 
 .. _`salt-contrib`: https://github.com/saltstack/salt-contrib
 .. _`salt-states`: https://github.com/saltstack/salt-states

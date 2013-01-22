@@ -1,24 +1,28 @@
 '''
 Manage the registry on Windows
 
-Required python modules: _winreg
+:depends:   - winreg Python module
 '''
 
 # TODO: Figure out the exceptions _winreg can raise and properly  catch
 #       them instead of a bare except that catches any exception at all
 
+# Import third party libs
 try:
     import _winreg
-    has_windows_modules = True
+    HAS_WINDOWS_MODULES = True
 except ImportError:
     try:
         import winreg as _winreg
-        has_windows_modules = True
+        HAS_WINDOWS_MODULES = True
     except ImportError:
-        has_windows_modules = False
+        HAS_WINDOWS_MODULES = False
 
-import salt.utils
+# Import python libs
 import logging
+
+# Import salt libs
+import salt.utils
 from salt.exceptions import CommandExecutionError
 
 log = logging.getLogger(__name__)
@@ -29,7 +33,7 @@ class Registry(object):
     Delay '_winreg' usage until this module is used
     '''
     def __init__(self):
-        hkeys = {
+        self.hkeys = {
             "HKEY_USERS":         _winreg.HKEY_USERS,
             "HKEY_CURRENT_USER":  _winreg.HKEY_CURRENT_USER,
             "HKEY_LOCAL_MACHINE": _winreg.HKEY_LOCAL_MACHINE,
@@ -46,9 +50,11 @@ def __virtual__():
     '''
     Only works on Windows systems
     '''
-    if __grains__['os'] == 'Windows':
-        if has_windows_modules:
+    if salt.utils.is_windows():
+        if HAS_WINDOWS_MODULES:
             return 'reg'
+        # TODO: This needs to be reworked after the module dependency
+        # docstring was changed to :depends
         log.warn(salt.utils.required_modules_error(__file__, __doc__))
     return False
 

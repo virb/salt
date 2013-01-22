@@ -2,7 +2,9 @@
 Support for nzbget
 '''
 
+# Import salt libs
 import salt.utils
+
 
 def __virtual__():
     '''
@@ -13,6 +15,7 @@ def __virtual__():
         return 'nzbget'
     return False
 
+
 def version():
     '''
     Return version from nzbget -v.
@@ -22,9 +25,10 @@ def version():
         salt '*' nzbget.version
     '''
     cmd = 'nzbget -v'
-    out = __salt__['cmd.run'](cmd).split('\n')
+    out = __salt__['cmd.run'](cmd).splitlines()
     ret = out[0].split(': ')
-    return { 'version': ret[1] }
+    return {'version': ret[1] }
+
 
 def serverversion():
     '''
@@ -36,14 +40,15 @@ def serverversion():
         salt '*' nzbget.serverversion moe
     '''
     cmd = 'ps aux | grep "nzbget -D" | grep -v grep | cut -d " " -f 1'
-    user = __salt__['cmd.run'](cmd).strip()
+    user = __salt__['cmd.run'](cmd)
     if not user:
         return 'Server not running'
     cmd = 'nzbget -V -c ~' + user + '/.nzbget | grep "server returned"'
-    out = __salt__['cmd.run'](cmd).split('\n')
+    out = __salt__['cmd.run'](cmd).splitlines()
     ret = out[0].split(': ')
-    return { 'user': user,
-             'version': ret[1], }
+    return {'user': user,
+            'version': ret[1], }
+
 
 def start(user=None):
     '''
@@ -57,8 +62,9 @@ def start(user=None):
     cmd = 'nzbget -D'
     if user:
         cmd = 'su - ' + user + ' -c "' + cmd + '"'
-    out = __salt__['cmd.run'](cmd).split('\n')
-    return cmd
+    out = __salt__['cmd.run'](cmd).splitlines()
+    return out
+
 
 def stop(user=None):
     '''
@@ -72,8 +78,9 @@ def stop(user=None):
     cmd = 'nzbget -Q'
     if user:
         cmd = 'su - ' + user + ' -c "' + cmd + '"'
-    out = __salt__['cmd.run'](cmd).split('\n')
-    return cmd
+    out = __salt__['cmd.run'](cmd).splitlines()
+    return out
+
 
 def list(user=None):
     '''
@@ -90,7 +97,7 @@ def list(user=None):
     cmd = 'nzbget -L'
     if user:
         cmd = cmd + ' -c ~' + user + '/.nzbget'
-    out = __salt__['cmd.run'](cmd).split('\n')
+    out = __salt__['cmd.run'](cmd).splitlines()
     for line in out:
         if 'Queue List' in line:
             inqueue = 1
@@ -111,6 +118,7 @@ def list(user=None):
         ret['Queue List'] = queuelist
     return ret
 
+
 def pause(user=None):
     '''
     Pause nzbget daemon using -P option.
@@ -123,8 +131,9 @@ def pause(user=None):
     cmd = 'nzbget -P'
     if user:
         cmd = cmd + ' -c ~' + user + '/.nzbget'
-    out = __salt__['cmd.run'](cmd).split('\n')
-    return cmd
+    out = __salt__['cmd.run'](cmd).splitlines()
+    return out
+
 
 def unpause(user=None):
     '''
@@ -138,6 +147,6 @@ def unpause(user=None):
     cmd = 'nzbget -U'
     if user:
         cmd = cmd + ' -c ~' + user + '/.nzbget'
-    out = __salt__['cmd.run'](cmd).split('\n')
-    return cmd
+    out = __salt__['cmd.run'](cmd).splitlines()
+    return out
 

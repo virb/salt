@@ -4,6 +4,7 @@ Manage Windows users with the net user command
 NOTE: This currently only works with local user accounts, not domain accounts
 '''
 
+# Import salt libs
 from salt._compat import string_types
 
 
@@ -172,7 +173,7 @@ def info(name):
     ret = {}
     items = {}
     cmd = 'net user {0}'.format(name)
-    lines = __salt__['cmd.run'](cmd).split('\n')
+    lines = __salt__['cmd.run'](cmd).splitlines()
     for line in lines:
         if 'name could not be found' in line:
             return False
@@ -228,11 +229,10 @@ def getent():
         salt '*' user.getent
     '''
     ret = []
-    items = {}
     users = []
     startusers = False
     cmd = 'net user'
-    lines = __salt__['cmd.run'](cmd).split('\n')
+    lines = __salt__['cmd.run'](cmd).splitlines()
     for line in lines:
         if '----------' in line:
             startusers = True

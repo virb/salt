@@ -1,10 +1,12 @@
 '''
 The service module for OpenBSD
 '''
-# Import Python libs
-import os
-# Import Salt libs
 
+# Import python libs
+import os
+
+# Import salt libs
+import salt.utils
 
 # XXX enable/disable support would be nice
 
@@ -14,10 +16,10 @@ def __virtual__():
     Only work on OpenBSD
     '''
     if __grains__['os'] == 'OpenBSD' and os.path.exists('/etc/rc.d/rc.subr'):
-        v = map(int, __grains__['kernelrelease'].split('.'))
+        krel = map(int, __grains__['kernelrelease'].split('.'))
         # The -f flag, used to force a script to run even if disabled,
         # was added after the 5.0 release.
-        if v[0] > 5 or (v[0] == 5 and v[1] > 0):
+        if krel[0] > 5 or (krel[0] == 5 and krel[1] > 0):
             return 'service'
     return False
 
@@ -60,7 +62,7 @@ def restart(name):
     return not __salt__['cmd.retcode'](cmd)
 
 
-def status(name):
+def status(name, sig=None):
     '''
     Return the status for a service, returns a bool whether the service is
     running.
@@ -69,5 +71,7 @@ def status(name):
 
         salt '*' service.status <service name>
     '''
+    if sig:
+        return bool(__salt__['status.pid'](sig))
     cmd = '/etc/rc.d/{0} -f check'.format(name)
     return not __salt__['cmd.retcode'](cmd)

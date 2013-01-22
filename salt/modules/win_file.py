@@ -2,36 +2,45 @@
 Manage information about files on the minion, set/read user, group
 data
 
-Required python modules: win32api, win32con, win32security, ntsecuritycon
+:depends:   - win32api
+            - win32con
+            - win32security
+            - ntsecuritycon
 '''
 
+# Import python libs
 import os
 import time
 import os.path
 import hashlib
 import logging
 
+# Import third party libs
 try:
     import win32security
     import ntsecuritycon as con
-    has_windows_modules = True
+    HAS_WINDOWS_MODULES = True
 except ImportError:
-    has_windows_modules = False
+    HAS_WINDOWS_MODULES = False
 
+# Import salt libs
 import salt.utils
 from salt.exceptions import SaltInvocationError
 
+
 log = logging.getLogger(__name__)
+
 
 def __virtual__():
     '''
     Only works on Windows systems
     '''
-    if __grains__['os'] == 'Windows':
-        if has_windows_modules:
+    if salt.utils.is_windows():
+        if HAS_WINDOWS_MODULES:
             return 'file'
         log.warn(salt.utils.required_modules_error(__file__, __doc__))
     return False
+
 
 __outputter__ = {
     'touch': 'txt',
@@ -48,7 +57,7 @@ def gid_to_group(gid):
         salt '*' file.gid_to_group S-1-5-21-626487655-2533044672-482107328-1010
     '''
     sid = win32security.GetBinarySid(gid)
-    name, domain, type = win32security.LookupAccountSid (None, sid)
+    name, domain, type = win32security.LookupAccountSid(None, sid)
     return name
 
 
@@ -60,7 +69,7 @@ def group_to_gid(group):
 
         salt '*' file.group_to_gid administrators
     '''
-    sid, domain, type = win32security.LookupAccountName (None, group)
+    sid, domain, type = win32security.LookupAccountName(None, group)
     return win32security.ConvertSidToStringSid(sid)
 
 
@@ -74,7 +83,9 @@ def get_gid(path):
     '''
     if not os.path.exists(path):
         return False
-    secdesc = win32security.GetFileSecurity (path, win32security.OWNER_SECURITY_INFORMATION)
+    secdesc = win32security.GetFileSecurity(
+        path, win32security.OWNER_SECURITY_INFORMATION
+    )
     owner_sid = secdesc.GetSecurityDescriptorOwner()
     return win32security.ConvertSidToStringSid(owner_sid)
 
@@ -89,9 +100,11 @@ def get_group(path):
     '''
     if not os.path.exists(path):
         return False
-    secdesc = win32security.GetFileSecurity (path, win32security.OWNER_SECURITY_INFORMATION)
+    secdesc = win32security.GetFileSecurity(
+        path, win32security.OWNER_SECURITY_INFORMATION
+    )
     owner_sid = secdesc.GetSecurityDescriptorOwner()
-    name, domain, type = win32security.LookupAccountSid (None, owner_sid)
+    name, domain, type = win32security.LookupAccountSid(None, owner_sid)
     return name
 
 
@@ -104,7 +117,7 @@ def uid_to_user(uid):
         salt '*' file.uid_to_user S-1-5-21-626487655-2533044672-482107328-1010
     '''
     sid = win32security.GetBinarySid(uid)
-    name, domain, type = win32security.LookupAccountSid (None, sid)
+    name, domain, type = win32security.LookupAccountSid(None, sid)
     return name
 
 
@@ -116,7 +129,7 @@ def user_to_uid(user):
 
         salt '*' file.user_to_uid myusername
     '''
-    sid, domain, type = win32security.LookupAccountName (None, user)
+    sid, domain, type = win32security.LookupAccountName(None, user)
     return win32security.ConvertSidToStringSid(sid)
 
 
@@ -130,9 +143,12 @@ def get_uid(path):
     '''
     if not os.path.exists(path):
         return False
-    secdesc = win32security.GetFileSecurity (path, win32security.OWNER_SECURITY_INFORMATION)
+    secdesc = win32security.GetFileSecurity(
+        path, win32security.OWNER_SECURITY_INFORMATION
+    )
     owner_sid = secdesc.GetSecurityDescriptorOwner()
     return win32security.ConvertSidToStringSid(owner_sid)
+
 
 def get_mode(path):
     '''
@@ -160,9 +176,11 @@ def get_user(path):
 
         salt '*' file.get_user c:\\temp\\test.txt
     '''
-    secdesc = win32security.GetFileSecurity (path, win32security.OWNER_SECURITY_INFORMATION)
+    secdesc = win32security.GetFileSecurity(
+        path, win32security.OWNER_SECURITY_INFORMATION
+    )
     owner_sid = secdesc.GetSecurityDescriptorOwner()
-    name, domain, type = win32security.LookupAccountSid (None, owner_sid)
+    name, domain, type = win32security.LookupAccountSid(None, owner_sid)
     return name
 
 
@@ -175,7 +193,9 @@ def chown(path, user, group):
         salt '*' file.chown c:\\temp\\test.txt myusername administrators
     '''
     # I think this function isn't working correctly yet
-    sd = win32security.GetFileSecurity (path, win32security.DACL_SECURITY_INFORMATION)
+    gsd = win32security.GetFileSecurity(
+        path, win32security.DACL_SECURITY_INFORMATION
+    )
     uid = user_to_uid(user)
     gid = group_to_gid(group)
     err = ''
@@ -188,11 +208,19 @@ def chown(path, user, group):
     if err:
         return err
 
-    dacl = win32security.ACL ()
-    dacl.AddAccessAllowedAce (win32security.ACL_REVISION, con.FILE_ALL_ACCESS, win32security.GetBinarySid(uid))
-    dacl.AddAccessAllowedAce (win32security.ACL_REVISION, con.FILE_ALL_ACCESS, win32security.GetBinarySid(gid))
-    sd.SetSecurityDescriptorDacl (1, dacl, 0)
-    return win32security.SetFileSecurity (path, win32security.DACL_SECURITY_INFORMATION, sd)
+    dacl = win32security.ACL()
+    dacl.AddAccessAllowedAce(
+        win32security.ACL_REVISION, con.FILE_ALL_ACCESS,
+        win32security.GetBinarySid(uid)
+    )
+    dacl.AddAccessAllowedAce(
+        win32security.ACL_REVISION, con.FILE_ALL_ACCESS,
+        win32security.GetBinarySid(gid)
+    )
+    gsd.SetSecurityDescriptorDacl(1, dacl, 0)
+    return win32security.SetFileSecurity(
+        path, win32security.DACL_SECURITY_INFORMATION, gsd
+    )
 
 
 def chgrp(path, group):
@@ -228,21 +256,23 @@ def get_sum(path, form='md5'):
     if not os.path.isfile(path):
         return 'File not found'
     try:
-        return getattr(hashlib, form)(open(path, 'rb').read()).hexdigest()
-    except (IOError, OSError) as e:
-        return 'File Error: %s' % (str(e))
-    except AttributeError as e:
-        return 'Hash ' + form + ' not supported'
-    except NameError as e:
+        return getattr(hashlib, form)(
+            salt.utils.fopen(path, 'rb').read()
+        ).hexdigest()
+    except (IOError, OSError) as err:
+        return 'File Error: {0}'.format(err)
+    except AttributeError:
+        return 'Hash {0} not supported'.format(form)
+    except NameError:
         return 'Hashlib unavailable - please fix your python install'
-    except Exception as e:
-        return str(e)
+    except Exception as err:
+        return str(err)
 
 
 def find(path, **kwargs):
     '''
     Approximate the Unix find(1) command and return a list of paths that
-    meet the specified critera.
+    meet the specified criteria.
 
     The options include match criteria::
 
@@ -331,19 +361,21 @@ def find(path, **kwargs):
         salt '*' file.find /var/log name=\*.[0-9] mtime=+30d size=+10m delete
     '''
     try:
-        f = salt.utils.find.Finder(kwargs)
+        finder = salt.utils.find.Finder(kwargs)
     except ValueError as ex:
         return 'error: {0}'.format(ex)
 
-    ret = [p for p in f.find(path)]
+    ret = [p for p in finder.find(path)]
     ret.sort()
     return ret
 
-def _sed_esc(s):
+
+def _sed_esc(string):
     '''
     Escape single quotes and forward slashes
     '''
-    return '{0}'.format(s).replace("'", "'\"'\"'").replace("/", "\/")
+    return '{0}'.format(string).replace("'", "'\"'\"'").replace("/", "\/")
+
 
 def sed(path, before, after, limit='', backup='.bak', options='-r -e',
         flags='g'):
@@ -387,15 +419,16 @@ def sed(path, before, after, limit='', backup='.bak', options='-r -e',
     after = _sed_esc(after)
 
     cmd = r"sed {backup}{options} '{limit}s/{before}/{after}/{flags}' {path}".format(
-            backup = '-i{0} '.format(backup) if backup else '',
-            options = options,
-            limit = '/{0}/ '.format(limit) if limit else '',
-            before = before,
-            after = after,
-            flags = flags,
-            path = path)
+            backup='-i{0} '.format(backup) if backup else '',
+            options=options,
+            limit='/{0}/ '.format(limit) if limit else '',
+            before=before,
+            after=after,
+            flags=flags,
+            path=path)
 
     return __salt__['cmd.run'](cmd)
+
 
 def uncomment(path, regex, char='#', backup='.bak'):
     '''
@@ -429,6 +462,7 @@ def uncomment(path, regex, char='#', backup='.bak'):
         after=r'\1',
         limit=regex.lstrip('^'),
         backup=backup)
+
 
 def comment(path, regex, char='#', backup='.bak'):
     '''
@@ -472,6 +506,7 @@ def comment(path, regex, char='#', backup='.bak'):
         after=r'{0}\1'.format(char),
         backup=backup)
 
+
 def contains(path, text, limit=''):
     '''
     Return True if the file at ``path`` contains ``text``
@@ -492,6 +527,7 @@ def contains(path, text, limit=''):
 
     return bool(result)
 
+
 def append(path, *args):
     '''
     Append text to the end of a file
@@ -506,11 +542,12 @@ def append(path, *args):
     '''
     # Largely inspired by Fabric's contrib.files.append()
 
-    with open(path, "a") as f:
+    with salt.utils.fopen(path, "a") as ofile:
         for line in args:
-            f.write('{0}\n'.format(line))
+            ofile.write('{0}\n'.format(line))
 
     return "Wrote {0} lines to '{1}'".format(len(args), path)
+
 
 def touch(name, atime=None, mtime=None):
     '''
@@ -534,7 +571,7 @@ def touch(name, atime=None, mtime=None):
     if mtime and mtime.isdigit():
         mtime = int(mtime)
     try:
-        with open(name, "a"):
+        with salt.utils.fopen(name, "a"):
             if not atime and not mtime:
                 times = None
             elif not mtime and atime:
@@ -544,10 +581,10 @@ def touch(name, atime=None, mtime=None):
             else:
                 times = (atime, mtime)
             os.utime(name, times)
-    except TypeError as exc:
+    except TypeError:
         msg = "atime and mtime must be integers"
         raise SaltInvocationError(msg)
-    except (IOError, OSError) as exc:
+    except (IOError, OSError):
         return False
 
     return os.path.exists(name)

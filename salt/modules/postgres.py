@@ -1,27 +1,30 @@
 '''
 Module to provide Postgres compatibility to salt.
 
-In order to connect to Postgres, certain configuration is required
-in /etc/salt/minion on the relevant minions. Some sample configs
-might look like::
+:configuration: In order to connect to Postgres, certain configuration is
+    required in /etc/salt/minion on the relevant minions. Some sample configs
+    might look like::
 
-    postgres.host: 'localhost'
-    postgres.port: '5432'
-    postgres.user: 'postgres'
-    postgres.pass: ''
-    postgres.db: 'postgres'
+        postgres.host: 'localhost'
+        postgres.port: '5432'
+        postgres.user: 'postgres'
+        postgres.pass: ''
+        postgres.db: 'postgres'
 
-This data can also be passed into pillar. Options passed into opts will
-overwrite options passed into pillar
+    This data can also be passed into pillar. Options passed into opts will
+    overwrite options passed into pillar
 '''
+
+# Import python libs
 import pipes
 import logging
+
+# Import salt libs
 from salt.utils import check_or_die
 from salt.exceptions import CommandNotFoundError
 
-
 log = logging.getLogger(__name__)
-__opts__ = {}
+
 
 def __virtual__():
     '''
@@ -46,7 +49,7 @@ def version():
     version_line =  __salt__['cmd.run']('psql --version').split("\n")[0]
     name = version_line.split(" ")[1]
     ver = version_line.split(" ")[2]
-    return "%s %s" % (name, ver)
+    return '{0} {1}'.format(name, ver)
 
 def _connection_defaults(user=None, host=None, port=None):
     '''
@@ -54,14 +57,13 @@ def _connection_defaults(user=None, host=None, port=None):
     values assigned to missing values.
     '''
     if not user:
-        user = __opts__.get('postgres.user') or __pillar__.get('postgres.user')
+        user = __salt__['config.option']('postgres.user')
     if not host:
-        host = __opts__.get('postgres.host') or __pillar__.get('postgres.host')
+        host = __salt__['config.option']('postgres.host')
     if not port:
-        port = __opts__.get('postgres.port') or __pillar__.get('postgres.port')
+        port = __salt__['config.option']('postgres.port')
 
     return (user, host, port)
-
 
 def _psql_cmd(*args, **kwargs):
     '''
@@ -74,21 +76,18 @@ def _psql_cmd(*args, **kwargs):
                                               kwargs.get('host'),
                                               kwargs.get('port'))
     cmd = ['psql', '--no-align', '--no-readline', '--no-password']
-    if user is not None:
+    if user:
         cmd += ['--username', user]
-    if host is not None:
+    if host:
         cmd += ['--host', host]
-    if port is not None:
+    if port:
         cmd += ['--port', port]
     cmd += args
     cmdstr = ' '.join(map(pipes.quote, cmd))
     return cmdstr
 
 
-'''
-Database related actions
-'''
-
+# Database related actions
 
 def db_list(user=None, host=None, port=None, runas=None):
     '''
@@ -102,14 +101,24 @@ def db_list(user=None, host=None, port=None, runas=None):
     (user, host, port) = _connection_defaults(user, host, port)
 
     ret = []
-    cmd = _psql_cmd('-l', user=user, host=host, port=port)
+    query = """SELECT datname as "Name", pga.rolname as "Owner", """ \
+    """pg_encoding_to_char(encoding) as "Encoding", datcollate as "Collate", datctype as "Ctype", """ \
+    """datacl as "Access privileges" FROM pg_database pgd, pg_authid pga WHERE pga.oid = pgd.datdba"""
+
+    cmd = _psql_cmd('-c', query,
+            host=host, user=user, port=port)
+
     cmdret = __salt__['cmd.run'](cmd, runas=runas)
     lines = [x for x in cmdret.splitlines() if len(x.split("|")) == 6]
-    header = [x.strip() for x in lines[0].split("|")]
-    for line in lines[1:]:
-        line = [x.strip() for x in line.split("|")]
-        if not line[0] == "":
-            ret.append(list(zip(header[:-1], line[:-1])))
+    if not lines:
+        log.error("no results from postgres.db_list")
+    else:
+        log.debug(lines)
+        header = [x.strip() for x in lines[0].split("|")]
+        for line in lines[1:]:
+            line = [x.strip() for x in line.split("|")]
+            if not line[0] == "":
+                ret.append(list(zip(header[:-1], line[:-1])))
 
     return ret
 
@@ -125,8 +134,8 @@ def db_exists(name, user=None, host=None, port=None, runas=None):
     (user, host, port) = _connection_defaults(user, host, port)
 
     databases = db_list(user=user, host=host, port=port, runas=runas)
-    for db in databases:
-        if name == dict(db).get('Name'):
+    for database in databases:
+        if name == dict(database).get('Name'):
             return True
 
     return False
@@ -168,11 +177,13 @@ def db_create(name,
             return False
 
     # Base query to create a database
-    query = 'CREATE DATABASE {0}'.format(name)
+    query = 'CREATE DATABASE "{0}"'.format(name)
 
     # "With"-options to create a database
     with_args = {
-        'OWNER': owner,
+        # owner needs to be enclosed in double quotes so postgres
+        # doesn't get thrown by dashes in the name
+        'OWNER': owner and '"{0}"'.format(owner),
         'TEMPLATE': template,
         'ENCODING': encoding and "'{0}'".format(encoding),
         'LC_COLLATE': lc_collate and "'{0}'".format(lc_collate),
@@ -180,9 +191,9 @@ def db_create(name,
         'TABLESPACE': tablespace,
     }
     with_chunks = []
-    for k, v in with_args.iteritems():
-        if v is not None:
-            with_chunks += [k, '=', v]
+    for key, value in with_args.iteritems():
+        if value is not None:
+            with_chunks += [key, '=', value]
     # Build a final query
     if with_chunks:
         with_chunks.insert(0, ' WITH')
@@ -225,9 +236,7 @@ def db_remove(name, user=None, host=None, port=None, runas=None):
         log.info("Failed to delete DB '{0}'.".format(name, ))
         return False
 
-'''
-User related actions
-'''
+# User related actions
 
 def user_list(user=None, host=None, port=None, runas=None):
     '''
@@ -242,14 +251,14 @@ def user_list(user=None, host=None, port=None, runas=None):
     ret = []
     query = (
         '''SELECT rolname, rolsuper, rolinherit, rolcreaterole, rolcreatedb,
-        rolcatupdate, rolcanlogin, rolconnlimit, rolvaliduntil, rolconfig, oid
+        rolcatupdate, rolcanlogin, rolreplication, rolconnlimit, rolvaliduntil, rolconfig, oid
         FROM pg_roles'''
     )
     cmd = _psql_cmd('-c', query,
             host=host, user=user, port=port)
 
     cmdret = __salt__['cmd.run'](cmd, runas=runas)
-    lines = [x for x in cmdret.splitlines() if len(x.split("|")) == 11]
+    lines = [x for x in cmdret.splitlines() if len(x.split("|")) == 12]
     log.debug(lines)
     header = [x.strip() for x in lines[0].split("|")]
     for line in lines[1:]:
@@ -278,7 +287,11 @@ def user_exists(name, user=None, host=None, port=None, runas=None):
     cmd = _psql_cmd('-c', query, host=host, user=user, port=port)
     cmdret = __salt__['cmd.run'](cmd, runas=runas)
     log.debug(cmdret.splitlines())
-    val = cmdret.splitlines()[1]
+    try:
+        val = cmdret.splitlines()[1]
+    except IndexError:
+        log.error("Invalid PostgreSQL result: '%s'", cmdret)
+        return False
     return True if val.strip() == 't' else False
 
 
@@ -290,6 +303,7 @@ def user_create(username,
                 createuser=False,
                 encrypted=False,
                 superuser=False,
+                replication=False,
                 password=None,
                 runas=None):
     '''
@@ -306,18 +320,20 @@ def user_create(username,
         log.info("User '{0}' already exists".format(username,))
         return False
 
-    sub_cmd = "CREATE USER {0} WITH".format(username, )
+    sub_cmd = 'CREATE USER "{0}" WITH'.format(username, )
     if password:
+        if encrypted:
+            sub_cmd = "{0} ENCRYPTED".format(sub_cmd, )
         escaped_password = password.replace("'", "''")
         sub_cmd = "{0} PASSWORD '{1}'".format(sub_cmd, escaped_password)
     if createdb:
         sub_cmd = "{0} CREATEDB".format(sub_cmd, )
     if createuser:
         sub_cmd = "{0} CREATEUSER".format(sub_cmd, )
-    if encrypted:
-        sub_cmd = "{0} ENCRYPTED".format(sub_cmd, )
     if superuser:
         sub_cmd = "{0} SUPERUSER".format(sub_cmd, )
+    if replication:
+        sub_cmd = "{0} REPLICATION".format(sub_cmd, )
 
     if sub_cmd.endswith("WITH"):
         sub_cmd = sub_cmd.replace(" WITH", "")
@@ -332,6 +348,7 @@ def user_update(username,
                 createdb=False,
                 createuser=False,
                 encrypted=False,
+                replication=False,
                 password=None,
                 runas=None):
     '''
@@ -357,6 +374,8 @@ def user_update(username,
         sub_cmd = "{0} CREATEUSER".format(sub_cmd, )
     if encrypted:
         sub_cmd = "{0} ENCRYPTED".format(sub_cmd, )
+    if encrypted:
+        sub_cmd = "{0} REPLICATION".format(sub_cmd, )
 
     if sub_cmd.endswith("WITH"):
         sub_cmd = sub_cmd.replace(" WITH", "")

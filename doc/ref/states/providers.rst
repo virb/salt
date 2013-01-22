@@ -8,21 +8,27 @@ Salt predetermines what modules should be mapped to what uses based on the
 properties of a system. These determinations are generally made for modules
 that provide things like package and service management.
 
-Sometimes in states it may be needed for an alternative module to be used
-to provide the functionality needed. For instance, an Arch Linux system may
-have been set up with systemd support, so instead of using the default service
-module detected for Arch Linux, the systemd module can be used:
+Sometimes in states, it may be necessary to use an alternative module to
+provide the needed functionality. For instance, an older Arch Linux system may
+not be running systemd, so instead of using the systemd service module, you can
+revert to the default service module:
 
 .. code-block:: yaml
 
     httpd:
       service.running:
         - enable: True
-        - provider: systemd
+        - provider: service
 
-In this instance the systemd module will replace the service virtual module
-which is used by default on Arch Linux, and the httpd service will be set up
-using systemd.
+In this instance, the basic :py:mod:`~salt.modules.service` module will replace
+the :py:mod:`~salt.modules.systemd` module which is used by default on Arch
+Linux, and the :program:`httpd` service will be managed using
+:program:`sysvinit`.
+
+.. note::
+
+    You can also set a provider globally in the minion config
+    :conf_minion:`providers`.
 
 Arbitrary Module Redirects
 ==========================
@@ -39,7 +45,8 @@ module can be used to provide certain functionality.
           - pkg: yumpkg5
           - cmd: customcmd
 
-In this example the default pkg module is being redirected to use the *yumpkg5*
-module (*yum* via shelling out instead of via the yum API), but is also using
-a custom module to invoke commands. This could be used to dramatically change
-the behavior of a given state.
+In this example the default :py:mod:`~salt.modules.pkg` module is being
+redirected to use the :py:mod:`~salt.modules.yumpkg5` module (:program:`yum`
+via shelling out instead of via the :program:`yum` Python API), but is also
+using a custom module to invoke commands. This could be used to dramatically
+change the behavior of a given state.

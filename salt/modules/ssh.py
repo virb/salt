@@ -1,17 +1,38 @@
 '''
 Manage client ssh components
 '''
+
+# Import python libs
 import os
 import re
-import binascii
 import hashlib
+import binascii
+import logging
+
+# Import salt libs
+import salt.utils
+from salt.exceptions import (
+    SaltInvocationError,
+    CommandExecutionError,
+)
+
+
+log = logging.getLogger(__name__)
+
+
+def __virtual__():
+    # TODO: This could work on windows with some love
+    if salt.utils.is_windows():
+        return False
+    return 'ssh'
 
 
 def _refine_enc(enc):
     '''
     Return the properly formatted ssh value for the authorized encryption key
-    type. ecdsa defaults to 256 bits, must give full ecdsa enc schema string if
-    using higher enc. If the type is not found, return ssh-rsa, the ssh default.
+    type. ecdsa defaults to 256 bits, must give full ecdsa enc schema string
+    if using higher enc. If the type is not found, return ssh-rsa, the ssh
+    default.
     '''
     rsa   = ['r', 'rsa', 'ssh-rsa']
     dss   = ['d', 'dsa', 'dss', 'ssh-dss']
@@ -52,7 +73,7 @@ def _replace_auth_key(
         key,
         enc='ssh-rsa',
         comment='',
-        options=[],
+        options=None,
         config='.ssh/authorized_keys'):
     '''
     Replace an existing key
@@ -61,29 +82,39 @@ def _replace_auth_key(
                 key,
                 enc,
                 comment,
-                options)
+                options or [])
 
     lines = []
     uinfo = __salt__['user.info'](user)
     full = os.path.join(uinfo['home'], config)
-    for line in open(full, 'r').readlines():
-        if line.startswith('#'):
-            # Commented Line
-            lines.append(line)
-            continue
-        comps = line.split()
-        if len(comps) < 2:
-            # Not a valid line
-            lines.append(line)
-            continue
-        key_ind = 1
-        if comps[0][:4:] not in ['ssh-', 'ecds']:
-            key_ind = 2
-        if comps[key_ind] == key:
-            lines.append(auth_line)
-        else:
-            lines.append(line)
-    open(full, 'w+').writelines(lines)
+    try:
+        # open the file for both reading AND writing
+        with salt.utils.fopen(full, 'r') as _fh:
+            for line in _fh:
+                if line.startswith('#'):
+                    # Commented Line
+                    lines.append(line)
+                    continue
+                comps = line.split()
+                if len(comps) < 2:
+                    # Not a valid line
+                    lines.append(line)
+                    continue
+                key_ind = 1
+                if comps[0][:4:] not in ['ssh-', 'ecds']:
+                    key_ind = 2
+                if comps[key_ind] == key:
+                    lines.append(auth_line)
+                else:
+                    lines.append(line)
+            _fh.close()
+            # Re-open the file writable after properly closing it
+            with salt.utils.fopen(full, 'w') as _fh:
+                # Write out any changes
+                _fh.writelines(lines)
+    except (IOError, OSError) as exc:
+        msg = 'Problem reading or writing to key file: {0}'
+        raise CommandExecutionError(msg.format(str(exc)))
 
 
 def _validate_keys(key_file):
@@ -92,44 +123,47 @@ def _validate_keys(key_file):
     '''
     ret = {}
     linere = re.compile(r'^(.*?)\s?((?:ssh\-|ecds).+)$')
+
     try:
-        for line in open(key_file, 'r').readlines():
-            if line.startswith('#'):
-                # Commented Line
-                continue
+        with salt.utils.fopen(key_file, 'r') as _fh:
+            for line in _fh:
+                if line.startswith('#'):
+                    # Commented Line
+                    continue
 
-            # get "{options} key"
-            ln = re.search(linere, line)
-            if not ln:
-                # not an auth ssh key, perhaps a blank line
-                continue
+                # get "{options} key"
+                search = re.search(linere, line)
+                if not search:
+                    # not an auth ssh key, perhaps a blank line
+                    continue
 
-            opts = ln.group(1)
-            comps = ln.group(2).split()
+                opts = search.group(1)
+                comps = search.group(2).split()
 
-            if len(comps) < 2:
-                # Not a valid line
-                continue
+                if len(comps) < 2:
+                    # Not a valid line
+                    continue
 
-            if opts:
-                # It has options, grab them
-                options = opts.split(',')
-            else:
-                options = []
+                if opts:
+                    # It has options, grab them
+                    options = opts.split(',')
+                else:
+                    options = []
 
-            enc = comps[0]
-            key = comps[1]
-            comment = ' '.join(comps[2:])
-            fingerprint = _fingerprint(key)
-            if fingerprint is None:
-                continue
+                enc = comps[0]
+                key = comps[1]
+                comment = ' '.join(comps[2:])
+                fingerprint = _fingerprint(key)
+                if fingerprint is None:
+                    continue
 
-            ret[key] = {'enc': enc,
-                        'comment': comment,
-                        'options': options,
-                        'fingerprint': fingerprint}
-    except IOError:
-        return {}
+                ret[key] = {'enc': enc,
+                            'comment': comment,
+                            'options': options,
+                            'fingerprint': fingerprint}
+    except (IOError, OSError):
+        msg = 'Problem reading ssh key file {0}'
+        raise CommandExecutionError(msg.format(key_file))
 
     return ret
 
@@ -160,11 +194,14 @@ def host_keys(keydir=None):
 
         salt '*' ssh.host_keys
     '''
-    # Set up the default keydir - needs to support sshd_config parsing in the
-    # future
+    # TODO: support parsing sshd_config for the key directory
     if not keydir:
         if __grains__['kernel'] == 'Linux':
             keydir = '/etc/ssh'
+        else:
+            # If keydir is None, os.listdir() will blow up
+            msg = 'ssh.host_keys: Please specify a keydir'
+            raise SaltInvocationError(msg)
     keys = {}
     for fn_ in os.listdir(keydir):
         if fn_.startswith('ssh_host_'):
@@ -174,7 +211,8 @@ def host_keys(keydir=None):
             if len(top) > 1:
                 kname += '.{0}'.format(top[1])
             try:
-                keys[kname] = open(os.path.join(keydir, fn_), 'r').read()
+                with salt.utils.fopen(os.path.join(keydir, fn_), 'r') as _fh:
+                    keys[kname] = _fh.readline().strip()
             except (IOError, OSError):
                 keys[kname] = ''
     return keys
@@ -188,7 +226,6 @@ def auth_keys(user, config='.ssh/authorized_keys'):
 
         salt '*' ssh.auth_keys root
     '''
-    ret = {}
     uinfo = __salt__['user.info'](user)
     full = os.path.join(uinfo['home'], config)
     if not os.path.isfile(full):
@@ -224,7 +261,7 @@ def check_key(user, key, enc, comment, options, config='.ssh/authorized_keys'):
 
     CLI Example::
 
-        salt '*' ssh.check_key <user> <key>
+        salt '*' ssh.check_key <user> <key> <enc> <comment> <options>
     '''
     current = auth_keys(user, config)
     nline = _format_auth_line(key, enc, comment, options)
@@ -255,44 +292,55 @@ def rm_auth_key(user, key, config='.ssh/authorized_keys'):
         # Remove the key
         uinfo = __salt__['user.info'](user)
         full = os.path.join(uinfo['home'], config)
+
+        # Return something sensible if the file doesn't exist
         if not os.path.isfile(full):
-            return 'User authorized keys file not present'
+            return 'Authorized keys file {1} not present'.format(full)
+
         lines = []
-        for line in open(full, 'r').readlines():
-            if line.startswith('#'):
-                # Commented Line
-                lines.append(line)
-                continue
+        try:
+            # Read every line in the file to find the right ssh key
+            # and then write out the correct one. Open the file once
+            with salt.utils.fopen(full, 'r') as _fh:
+                for line in _fh:
+                    if line.startswith('#'):
+                        # Commented Line
+                        lines.append(line)
+                        continue
 
-            # get "{options} key"
-            ln = re.search(linere, line)
-            if not ln:
-                # not an auth ssh key, perhaps a blank line
-                continue
+                    # get "{options} key"
+                    search = re.search(linere, line)
+                    if not search:
+                        # not an auth ssh key, perhaps a blank line
+                        continue
 
-            opts = ln.group(1)
-            comps = ln.group(2).split()
+                    comps = search.group(2).split()
 
-            if len(comps) < 2:
-                # Not a valid line
-                lines.append(line)
-                continue
+                    if len(comps) < 2:
+                        # Not a valid line
+                        lines.append(line)
+                        continue
 
-            if opts:
-                # It has options, grab them
-                options = opts.split(',')
-            else:
-                options = []
+                    pkey = comps[1]
 
-            pkey = comps[1]
+                    # This is the key we are "deleting", so don't put
+                    # it in the list of keys to be re-added back
+                    if pkey == key:
+                        continue
 
-            if pkey == key:
-                continue
-            else:
-                lines.append(line)
-        open(full, 'w+').writelines(lines)
+                    lines.append(line)
+
+            # Let the context manager do the right thing here and then
+            # re-open the file in write mode to save the changes out.
+            with salt.utils.fopen(full, 'w') as _fh:
+                _fh.writelines(lines)
+        except (IOError, OSError) as exc:
+            log.warn('Could not read/write key file: {0}'.format(str(exc)))
+            return 'Key not removed'
         return 'Key removed'
+    # TODO: Should this function return a simple boolean?
     return 'Key not present'
+
 
 def set_auth_key_from_file(
         user,
@@ -310,9 +358,9 @@ def set_auth_key_from_file(
     # TODO: add support for pulling keys from other file sources as well
     lfile = __salt__['cp.cache_file'](source, env)
     if not os.path.isfile(lfile):
-        return 'fail'
+        msg = 'Failed to pull key file from salt file server'
+        raise CommandExecutionError(msg)
 
-    newkey = {}
     rval = ''
     newkey = _validate_keys(lfile)
     for k in newkey:
@@ -337,15 +385,19 @@ def set_auth_key_from_file(
     else:
         return 'no change'
 
+
 def set_auth_key(
         user,
         key,
         enc='ssh-rsa',
         comment='',
-        options=[],
+        options=None,
         config='.ssh/authorized_keys'):
     '''
-    Add a key to the authorized_keys file
+    Add a key to the authorized_keys file. The "key" parameter must only be the
+    string of text that is the encoded key. If the key begins with "ssh-rsa"
+    or ends with user@host, remove those from the key before passing it to this
+    function.
 
     CLI Example::
 
@@ -363,7 +415,7 @@ def set_auth_key(
                 key,
                 enc,
                 comment,
-                options,
+                options or [],
                 config)
         return 'replace'
     elif status == 'exists':
@@ -385,12 +437,21 @@ def set_auth_key(
             os.chmod(dpath, 448)
 
         if not os.path.isfile(fconfig):
-            open(fconfig, 'a+').write('{0}'.format(auth_line))
+            new_file = True
+        else:
+            new_file = False
+
+        try:
+            with salt.utils.fopen(fconfig, 'a+') as _fh:
+                _fh.write('{0}'.format(auth_line))
+        except (IOError, OSError) as exc:
+            msg = 'Could not write to key file: {0}'
+            raise CommandExecutionError(msg.format(str(exc)))
+
+        if new_file:
             if os.geteuid() == 0:
                 os.chown(fconfig, uinfo['uid'], uinfo['gid'])
             os.chmod(fconfig, 384)
-        else:
-            open(fconfig, 'a+').write('{0}'.format(auth_line))
         return 'new'
 
 
@@ -434,7 +495,7 @@ def get_known_host(user, hostname, config='.ssh/known_hosts'):
 
 def recv_known_host(user, hostname, enc=None, port=None, hash_hostname=False):
     '''
-    Retreive information about host public key from remote server
+    Retrieve information about host public key from remote server
 
     CLI Example::
 
@@ -497,7 +558,7 @@ def rm_known_host(user, hostname, config='.ssh/known_hosts'):
         return {'status': 'error',
                 'error': 'Known hosts file {0} does not exist'.format(full)}
     cmd = 'ssh-keygen -R "{0}" -f "{1}"'.format(hostname, full)
-    cmd_result = __salt__['cmd.run'](cmd).strip()
+    cmd_result = __salt__['cmd.run'](cmd)
     return {'status': 'removed', 'comment': cmd_result}
 
 
@@ -532,7 +593,7 @@ def set_known_host(user, hostname,
         return {'status': 'exists', 'key': stored_host}
 
     remote_host = recv_known_host(user, hostname, enc=enc, port=port,
-                                  hash_hostname=True)
+                                  hash_hostname=hash_hostname)
     if not remote_host:
         return {'status': 'error',
                 'error': 'Unable to receive remote host key'}
@@ -548,13 +609,13 @@ def set_known_host(user, hostname,
     uinfo = __salt__['user.info'](user)
     full = os.path.join(uinfo['home'], config)
     line = '{hostname} {enc} {key}\n'.format(**remote_host)
-    with open(full, 'a') as fd:
-        fd.write(line)
+
+    try:
+        with salt.utils.fopen(full, 'a') as ofile:
+            ofile.write(line)
+    except (IOError, OSError):
+        raise CommandExecutionError("Couldn't append to known hosts file")
+
     if os.geteuid() == 0:
         os.chown(full, uinfo['uid'], uinfo['gid'])
     return {'status': 'updated', 'old': stored_host, 'new': remote_host}
-
-    status = check_known_host(user, hostname, fingerprint=fingerprint,
-                                               config=config)
-    if status == 'exists':
-        return None

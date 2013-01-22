@@ -2,34 +2,21 @@
 Module for gathering and managing network information
 '''
 
-import sys
-from string import ascii_letters, digits
-from salt.utils.interfaces import *
-from salt.utils.socket_util import *
+# Import python libs
+import re
 
-__outputter__ = {
-    'dig':     'txt',
-    'ping':    'txt',
-    'netstat': 'txt',
-}
+# Import salt libs
+import salt.utils
+from salt.utils.socket_util import sanitize_host
+
 
 def __virtual__():
     '''
     Only works on Windows systems
     '''
-    if __grains__['os'] == 'Windows':
-        setattr(sys.modules['salt.utils.interfaces'], 'interfaces', interfaces)
+    if salt.utils.is_windows():
         return 'network'
     return False
-
-
-def _sanitize_host(host):
-    '''
-    Sanitize host string.
-    '''
-    return ''.join([
-        c for c in host[0:255] if c in (ascii_letters + digits + '.-')
-    ])
 
 
 def ping(host):
@@ -40,7 +27,7 @@ def ping(host):
 
         salt '*' network.ping archlinux.org
     '''
-    cmd = 'ping -n 4 %s' % _sanitize_host(host)
+    cmd = 'ping -n 4 {0}'.format(sanitize_host(host))
     return __salt__['cmd.run'](cmd)
 
 
@@ -54,7 +41,7 @@ def netstat():
     '''
     ret = []
     cmd = 'netstat -na'
-    lines = __salt__['cmd.run'](cmd).split('\n')
+    lines = __salt__['cmd.run'](cmd).splitlines()
     for line in lines:
         comps = line.split()
         if line.startswith('  TCP'):
@@ -81,8 +68,8 @@ def traceroute(host):
         salt '*' network.traceroute archlinux.org
     '''
     ret = []
-    cmd = 'tracert %s' % _sanitize_host(host)
-    lines = __salt__['cmd.run'](cmd).split('\n')
+    cmd = 'tracert {0}'.format(sanitize_host(host))
+    lines = __salt__['cmd.run'](cmd).splitlines()
     for line in lines:
         if not ' ' in line:
             continue
@@ -133,8 +120,8 @@ def nslookup(host):
         salt '*' network.nslookup archlinux.org
     '''
     ret = []
-    cmd = 'nslookup %s' % _sanitize_host(host)
-    lines = __salt__['cmd.run'](cmd).split('\n')
+    cmd = 'nslookup {0}'.format(sanitize_host(host))
+    lines = __salt__['cmd.run'](cmd).splitlines()
     for line in lines:
         if line.startswith('Non-authoritative'):
             continue
@@ -154,7 +141,7 @@ def dig(host):
 
         salt '*' network.dig archlinux.org
     '''
-    cmd = 'dig %s' % _sanitize_host(host)
+    cmd = 'dig {0}'.format(sanitize_host(host))
     return __salt__['cmd.run'](cmd)
 
 
@@ -163,14 +150,14 @@ def _cidr_to_ipv4_netmask(cidr_bits):
     Returns an IPv4 netmask
     '''
     netmask = ''
-    for n in range(4):
-        if n:
+    for idx in range(4):
+        if idx:
             netmask += '.'
         if cidr_bits >= 8:
             netmask += '255'
             cidr_bits -= 8
         else:
-            netmask += '%d' % (256-(2**(8-cidr_bits)))
+            netmask += '{0:d}'.format(256 - (2 ** (8 - cidr_bits)))
             cidr_bits = 0
     return netmask
 
@@ -180,7 +167,6 @@ def _interfaces_ipconfig(out):
     Returns a dictionary of interfaces with various information about each
     (up/down state, ip address, netmask, and hwaddr)
     '''
-    import re
     ifaces = dict()
     iface = None
 
@@ -194,9 +180,9 @@ def _interfaces_ipconfig(out):
             addr = None
             continue
         if iface:
-            k, v = line.split(',', 1)
-            key = k.strip(' .')
-            val = v.strip()
+            key, val = line.split(',', 1)
+            key = key.strip(' .')
+            val = val.strip()
             if addr and key in ('Subnet Mask'):
                 addr['netmask'] = val
             elif key in ('IP Address', 'IPv4 Address'):
@@ -204,7 +190,7 @@ def _interfaces_ipconfig(out):
                     iface['inet'] = list()
                 addr = {'address': val.rstrip('(Preferred)'),
                         'netmask': None,
-                        'broadcast': None} # TODO find the broadcast
+                        'broadcast': None}  # TODO find the broadcast
                 iface['inet'].append(addr)
             elif 'IPv6 Address' in key:
                 if 'inet6' not in iface:
@@ -218,10 +204,10 @@ def _interfaces_ipconfig(out):
             elif key in ('Media State'):
                 # XXX seen used for tunnel adaptors
                 # might be useful
-                iface['up'] = (v != 'Media disconnected')
+                iface['up'] = (val != 'Media disconnected')
 
 
 def interfaces():
     cmd = __salt__['cmd.run']('ipconfig /all')
-    ifaces = _ifconfig(cmd)
+    ifaces = _interfaces_ipconfig(cmd)
     return ifaces

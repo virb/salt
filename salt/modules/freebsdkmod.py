@@ -2,6 +2,7 @@
 Module to manage FreeBSD kernel modules
 '''
 
+# Import python libs
 import os
 
 
@@ -49,7 +50,7 @@ def available():
         salt '*' kmod.available
     '''
     ret = []
-    for path in __salt__['cmd.run']('ls /boot/kernel | grep .ko$').split('\n'):
+    for path in __salt__['cmd.run']('ls /boot/kernel | grep .ko$').splitlines():
         bpath = os.path.basename(path)
         comps = bpath.split('.')
         if 'ko' in comps:
@@ -78,7 +79,7 @@ def lsmod():
         salt '*' kmod.lsmod
     '''
     ret = []
-    for line in __salt__['cmd.run']('kldstat').split('\n'):
+    for line in __salt__['cmd.run']('kldstat').splitlines():
         comps = line.split()
         if not len(comps) > 2:
             continue
@@ -105,7 +106,7 @@ def load(mod):
         salt '*' kmod.load kvm
     '''
     pre_mods = lsmod()
-    data = __salt__['cmd.run_all']('kldload {0}'.format(mod))
+    __salt__['cmd.run_all']('kldload {0}'.format(mod))
     post_mods = lsmod()
     return _new_mods(pre_mods, post_mods)
 
@@ -119,6 +120,6 @@ def remove(mod):
         salt '*' kmod.remove kvm
     '''
     pre_mods = lsmod()
-    data = __salt__['cmd.run_all']('kldunload {0}'.format(mod))
+    __salt__['cmd.run_all']('kldunload {0}'.format(mod))
     post_mods = lsmod()
     return _rm_mods(pre_mods, post_mods)

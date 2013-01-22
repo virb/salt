@@ -3,6 +3,8 @@ Top level package command wrapper, used to translate the os detected by the
 grains to the correct service manager
 '''
 
+# Import salt libs
+import salt.utils
 
 def __virtual__():
     '''
@@ -22,7 +24,7 @@ def get_enabled():
         salt '*' service.get_enabled
     '''
     ret = set()
-    lines = __salt__['cmd.run']('rc-update show').strip().split('\n')
+    lines = __salt__['cmd.run']('rc-update show').splitlines()
     for line in lines:
         if not '|' in line:
             continue
@@ -41,7 +43,7 @@ def get_disabled():
         salt '*' service.get_disabled
     '''
     ret = set()
-    lines = __salt__['cmd.run']('rc-update -v show').strip().split('\n')
+    lines = __salt__['cmd.run']('rc-update -v show').splitlines()
     for line in lines:
         if not '|' in line:
             continue
@@ -111,12 +113,9 @@ def status(name, sig=None):
 
         salt '*' service.status <service name> [service signature]
     '''
-    sig = name if not sig else sig
-    cmd = "{0[ps]} | grep {1} | grep -v grep | awk '{{print $2}}'".format(
-            __grains__, sig)
-    return __salt__['cmd.run'](cmd).strip()
+    return __salt__['status.pid'](sig if sig else name)
 
-def enable(name):
+def enable(name, **kwargs):
     '''
     Enable the named service to start at boot
 
@@ -127,7 +126,7 @@ def enable(name):
     cmd = 'rc-update add {0} default'.format(name)
     return not __salt__['cmd.retcode'](cmd)
 
-def disable(name):
+def disable(name, **kwargs):
     '''
     Disable the named service to start at boot
 

@@ -1,6 +1,8 @@
 '''
 Manage groups on Linux
 '''
+
+# Import python libs
 try:
     import grp
 except ImportError:
@@ -11,7 +13,7 @@ def __virtual__():
     '''
     Set the user module if the kernel is Linux
     '''
-    return 'group' if __grains__['kernel'] == 'Linux' else False
+    return 'group' if __grains__.get('kernel', '') == 'Linux' else False
 
 
 def add(name, gid=None, system=False):
@@ -55,11 +57,22 @@ def info(name):
 
         salt '*' group.info foo
     '''
-    grinfo = grp.getgrnam(name)
-    return {'name': grinfo.gr_name,
-            'passwd': grinfo.gr_passwd,
-            'gid': grinfo.gr_gid,
-            'members': grinfo.gr_mem}
+    try:
+        grinfo = grp.getgrnam(name)
+    except KeyError:
+        return {}
+    else:
+        return _format_info(grinfo)
+
+
+def _format_info(data):
+    '''
+    Return formatted information in a pretty way.
+    '''
+    return {'name': data.gr_name,
+            'passwd': data.gr_passwd,
+            'gid': data.gr_gid,
+            'members': data.gr_mem}
 
 
 def getent():
@@ -70,9 +83,14 @@ def getent():
 
         salt '*' group.getent
     '''
+    if 'groupadd_getent' in __context__:
+      return __context__['groupadd_getent']
+
     ret = []
     for grinfo in grp.getgrall():
-        ret.append(info(grinfo.gr_name))
+        ret.append(_format_info(grinfo))
+    __context__['groupadd_getent'] = ret
+
     return ret
 
 

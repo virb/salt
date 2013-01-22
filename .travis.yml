@@ -4,17 +4,14 @@ python:
   - '2.6'
   - '2.7'
 
-branches:
-  only:
-    - develop
-
 before_install:
-  - sudo apt-get update && sudo apt-get install swig
+  - sudo apt-get update && sudo apt-get install git swig supervisor rabbitmq-server ruby
+  - (git describe && git fetch --tags) || (git remote add upstream git://github.com/saltstack/salt.git && git fetch --tags upstream)
   - pip install http://dl.dropbox.com/u/174789/m2crypto-0.20.1.tar.gz
-  - "if [[ $TRAVIS_PYTHON_VERSION == '2.6' ]]; then pip install unittest2; fi"
+  - "if [[ $TRAVIS_PYTHON_VERSION == '2.6' ]]; then pip install unittest2 ordereddict; fi"
 
 install: pip install -r requirements.txt --use-mirrors
-script: python setup.py test
+script: sudo -E python setup.py test --runtests-opts='--run-destructive --sysinfo -v'
 
 notifications:
   irc:

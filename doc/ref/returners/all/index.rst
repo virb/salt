@@ -1,8 +1,8 @@
 .. _all-salt.returners:
 
-==============================
-Full list of builtin returners
-==============================
+=====================================
+Full list of builtin returner modules
+=====================================
 
 .. currentmodule:: salt.returners
 
@@ -10,7 +10,12 @@ Full list of builtin returners
     :toctree:
     :template: autosummary.rst.tmpl
 
-    local
     cassandra_return
+    local
+    mongo_future_return
     mongo_return
+    mysql
+    postgres
     redis_return
+    smtp_return
+    syslog_return

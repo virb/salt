@@ -2,31 +2,29 @@
 Provide the hyper module for kvm hypervisors. This is the interface used to
 interact with kvm on behalf of the salt-virt interface
 
-Required python modules: libvirt
+:depends:   - libvirt Python module
 '''
 
 # This is a test interface for the salt-virt system. The api in this file is
 # VERY likely to change.
 
 
-# Import Python Libs
+# Import python libs
 import os
 import shutil
 import string
 import subprocess
 from xml.dom import minidom
 
-# Import libvirt
+# Import third party libs
+import yaml
 try:
     import libvirt
-    has_libvirt = True
+    HAS_LIBVIRT = True
 except ImportError:
-    has_libvirt = False
+    HAS_LIBVIRT = False
 
-# Import Third party modules
-import yaml
-
-# Import Salt Modules
+# Import salt libs
 import salt.utils
 from salt._compat import StringIO
 
@@ -51,9 +49,12 @@ def __virtual__():
         return False
     if not os.path.exists('/proc/modules'):
         return False
-    if 'kvm_' not in open('/proc/modules').read():
+    try:
+        if 'kvm_' not in salt.utils.fopen('/proc/modules').read():
+            return False
+    except IOError:
         return False
-    if not has_libvirt:
+    if not HAS_LIBVIRT:
         return False
     try:
         libvirt_conn = libvirt.open('qemu:///system')
@@ -214,6 +215,7 @@ def hyper_info():
 # get_disks
 # get_conf
 
+
 def _get_image(image, vda):
     '''
     Copy the image into place
@@ -238,13 +240,13 @@ def _get_image(image, vda):
 
 
 def _gen_xml(name,
-        cpus,
-        mem,
-        vmdir,
-        disks,
-        network,
-        desc,
-        opts):
+             cpus,
+             mem,
+             vmdir,
+             disks,
+             network,
+             desc,
+             opts):
     '''
     Generate the xml used for the libvirt configuration
     '''
@@ -327,9 +329,9 @@ def init(
         mem,
         image,
         storage_dir,
-        network={'eth0': {'bridge': 'br0', 'mac': ''}},
+        network=None,
         desc='',
-        opts={}):
+        opts=None):
     '''
     Create a KVM virtual machine based on these passed options, the virtual
     machine will be started upon creation
@@ -338,15 +340,17 @@ def init(
 
         salt '*' hyper.init webserver 2 2048 salt://fedora/f16.img:virt /srv/vm/images
     '''
+    if network is None:
+        network = {'eth0': {'bridge': 'br0', 'mac': ''}}
     vmdir = os.path.join(storage_dir, name)
     if not os.path.exists(vmdir):
         os.makedirs(vmdir)
     vda = os.path.join(vmdir, 'vda')
     _get_image(image, vda)
     # The image is in place
-    xml = _gen_xml(name, cpus, mem, vmdir, network, desc, opts)
+    xml = _gen_xml(name, cpus, mem, vmdir, network, desc, opts or {})
     config = os.path.join(vmdir, 'config.xml')
-    open(config, 'w+').write(xml)
+    salt.utils.fopen(config, 'w+').write(xml)
     return start(config)
 
 
@@ -362,6 +366,7 @@ def start(config):
     # return
     cmd = 'virsh create {0}'.format(config)
     return not __salt__['cmd.retcode'](cmd)
+
 
 def halt(name):
     '''
@@ -471,8 +476,8 @@ def get_disks(name):
         if 'dev' in list(target.attributes) and 'file' in list(source.attributes):
             disks[target.getAttribute('dev')] = {'file': source.getAttribute('file')}
     for dev in disks:
-        disks[dev].update(yaml.safe_load(subprocess.Popen('qemu-img info ' \
-            + disks[dev]['file'],
+        disks[dev].update(yaml.safe_load(subprocess.Popen(
+            'qemu-img info ' + disks[dev]['file'],
             shell=True,
             stdout=subprocess.PIPE).communicate()[0]))
     return disks

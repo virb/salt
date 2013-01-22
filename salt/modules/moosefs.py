@@ -2,6 +2,17 @@
 Module for gathering and managing information about MooseFS
 '''
 
+# Import salt libs
+import salt.utils
+
+def __virtual__():
+    '''
+    Only load if the mfs commands are installed
+    '''
+    if salt.utils.which('mfsgetgoal'):
+        return 'moosefs'
+    return False
+
 
 def dirinfo(path, opts=None):
     '''
@@ -18,7 +29,7 @@ def dirinfo(path, opts=None):
     cmd += ' ' + path
     out = __salt__['cmd.run_all'](cmd)
 
-    output = out['stdout'].split('\n')
+    output = out['stdout'].splitlines()
     for line in output:
         if not line:
             continue
@@ -40,7 +51,7 @@ def fileinfo(path):
     chunknum = ''
     out = __salt__['cmd.run_all'](cmd)
 
-    output = out['stdout'].split('\n')
+    output = out['stdout'].splitlines()
     for line in output:
         if not line:
             continue
@@ -83,7 +94,7 @@ def mounts():
     ret = {}
     out = __salt__['cmd.run_all'](cmd)
 
-    output = out['stdout'].split('\n')
+    output = out['stdout'].splitlines()
     for line in output:
         if not line:
             continue
@@ -122,7 +133,7 @@ def getgoal(path, opts=None):
     cmd += ' ' + path
     out = __salt__['cmd.run_all'](cmd)
 
-    output = out['stdout'].split('\n')
+    output = out['stdout'].splitlines()
     if not 'r' in opts:
         goal = output[0].split(': ')
         ret = {

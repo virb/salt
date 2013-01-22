@@ -3,26 +3,28 @@ Setup of Python virtualenv sandboxes.
 =====================================
 
 '''
+
+# Import python libs
 import logging
 import os
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)  # pylint: disable-msg=C0103
 
 
 def managed(name,
-        venv_bin='virtualenv',
-        requirements='',
-        no_site_packages=False,
-        system_site_packages=False,
-        distribute=False,
-        clear=False,
-        python='',
-        extra_search_dir='',
-        never_download=False,
-        prompt='',
-        __env__='base',
-        runas=None,
-        cwd=None):
+            venv_bin='virtualenv',
+            requirements='',
+            no_site_packages=False,
+            system_site_packages=False,
+            distribute=False,
+            clear=False,
+            python='',
+            extra_search_dir='',
+            never_download=False,
+            prompt='',
+            __env__='base',
+            runas=None,
+            cwd=None):
     '''
     Create a virtualenv and optionally manage it with pip
 
@@ -39,11 +41,11 @@ def managed(name,
     .. code-block:: yaml
 
         /var/www/myvirtualenv.com:
-          virtualenv.manage:
+          virtualenv.managed:
             - no_site_packages: True
             - requirements: salt://REQUIREMENTS.txt
     '''
-    ret = {'name': name, 'result': None, 'comment': '', 'changes': {}}
+    ret = {'name': name, 'result': True, 'comment': '', 'changes': {}}
 
     if not 'virtualenv.create' in __salt__:
         ret['result'] = False
@@ -54,15 +56,22 @@ def managed(name,
     venv_exists = os.path.exists(venv_py)
 
     # Bail out early if the specified requirements file can't be found
-    if requirements:
-        reqs_hash = __salt__['cp.hash_file'](requirements, __env__)
-
-        if not reqs_hash:
+    if requirements and requirements.startswith('salt://'):
+        cached_requirements = __salt__['cp.is_cached'](requirements, __env__)
+        if not cached_requirements:
+            # It's not cached, let's cache it.
+            cached_requirements = __salt__['cp.cache_file'](requirements, __env__)
+        # Check if the master version has changed.
+        if __salt__['cp.hash_file'](requirements, __env__) != \
+                __salt__['cp.hash_file'](cached_requirements, __env__):
+            cached_requirements = __salt__['cp.cache_file'](requirements, __env__)
+        if not cached_requirements:
             ret.update({
                 'result': False,
                 'comment': "pip requirements file '{0}' not found".format(
-                    requirements)})
-
+                    requirements
+                )
+            })
             return ret
 
     # If it already exists, grab the version for posterity
@@ -74,12 +83,20 @@ def managed(name,
 
     # Create (or clear) the virtualenv
     if __opts__['test']:
+        if venv_exists and clear:
+            ret['result'] = None
+            ret['comment'] = 'Virtualenv {0} is set to be cleared'.format(name)
+            return ret
+        if venv_exists and not clear:
+            #ret['result'] = None
+            ret['comment'] = 'Virtualenv {0} is already created'.format(name)
+            return ret
         ret['result'] = None
-        ret['comment'] = 'Virtualenv {0} is set to be created or cleared'
+        ret['comment'] = 'Virtualenv {0} is set to be created'.format(name)
         return ret
 
     if not venv_exists or (venv_exists and clear):
-        __salt__['virtualenv.create'](name,
+        _ret = __salt__['virtualenv.create'](name,
                 venv_bin=venv_bin,
                 no_site_packages=no_site_packages,
                 system_site_packages=system_site_packages,
@@ -91,6 +108,7 @@ def managed(name,
                 prompt=prompt,
                 runas=runas)
 
+        ret['result'] = _ret['retcode'] == 0
         ret['changes']['new'] = __salt__['cmd.run_stderr'](
                 '{0} -V'.format(venv_py)).strip('\n')
 
@@ -105,9 +123,15 @@ def managed(name,
     # Populate the venv via a requirements file
     if requirements:
         before = set(__salt__['pip.freeze'](bin_env=name))
-        __salt__['pip.install'](
-            requirements=requirements, bin_env=name, runas=runas, cwd=cwd
+        _ret = __salt__['pip.install'](
+            requirements=requirements, bin_env=name, runas=runas, cwd=cwd, __env__=__env__
         )
+        ret['result'] &= _ret['retcode'] == 0
+        if _ret['retcode'] > 0:
+            ret['comment'] = '{0}\n{1}\n{2}'.format(ret['comment'],
+                                                    _ret['stdout'],
+                                                    _ret['stderr'])
+
         after = set(__salt__['pip.freeze'](bin_env=name))
 
         new = list(after - before)
@@ -117,7 +141,6 @@ def managed(name,
             ret['changes']['packages'] = {
                 'new': new if new else '',
                 'old': old if old else ''}
-    ret['result'] = True
     return ret
 
-manage = managed
+manage = managed  # pylint: disable-msg=C0103

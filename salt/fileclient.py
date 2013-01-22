@@ -1,6 +1,7 @@
 '''
 Classes that manage file clients
 '''
+
 # Import python libs
 import contextlib
 import logging
@@ -10,9 +11,8 @@ import shutil
 import string
 import subprocess
 
-# Import third-party libs
+# Import third party libs
 import yaml
-import zmq
 
 # Import salt libs
 from salt.exceptions import MinionError, SaltReqTimeoutError
@@ -23,6 +23,7 @@ import salt.utils
 import salt.payload
 import salt.utils
 import salt.utils.templates
+import salt.utils.gzip_util
 from salt._compat import (
     URLError, HTTPError, BaseHTTPServer, urlparse, url_open)
 
@@ -95,9 +96,10 @@ class Client(object):
         yield dest
         os.umask(cumask)
 
-    def get_file(self, path, dest='', makedirs=False, env='base'):
+    def get_file(self, path, dest='', makedirs=False, env='base', gzip=None):
         '''
-        Copies a file from the local files or master depending on implementation
+        Copies a file from the local files or master depending on
+        implementation
         '''
         raise NotImplementedError
 
@@ -139,6 +141,11 @@ class Client(object):
         '''
         ret = []
         path = self._check_proto(path)
+        log.info(
+            'Caching directory \'{0}\' for environment \'{1}\''.format(
+                path, env
+            )
+        )
         for fn_ in self.file_list(env):
             if fn_.startswith(path):
                 local = self.cache_file('salt://{0}'.format(fn_), env)
@@ -149,12 +156,12 @@ class Client(object):
         if include_empty:
             # Break up the path into a list containing the bottom-level directory
             # (the one being recursively copied) and the directories preceding it
-            separated = string.rsplit(path,'/',1)
-            if len(separated) != 2:
-                # No slashes in path. (This means all files in env will be copied)
-                prefix = ''
-            else:
-                prefix = separated[0]
+            #separated = string.rsplit(path, '/', 1)
+            #if len(separated) != 2:
+            #    # No slashes in path. (This means all files in env will be copied)
+            #    prefix = ''
+            #else:
+            #    prefix = separated[0]
             for fn_ in self.file_list_emptydirs(env):
                 if fn_.startswith(path):
                     dest = salt.utils.path_join(
@@ -162,7 +169,7 @@ class Client(object):
                         'files',
                         env
                     )
-                    minion_dir = '%s/%s' % (dest,fn_)
+                    minion_dir = '{0}/{1}'.format(dest, fn_)
                     if not os.path.isdir(minion_dir):
                         os.makedirs(minion_dir)
                     ret.append(minion_dir)
@@ -198,6 +205,12 @@ class Client(object):
         '''
         return []
 
+    def dir_list(self, env='base'):
+        '''
+        This function must be overwritten
+        '''
+        return []
+
     def is_cached(self, path, env='base'):
         '''
         Returns the full path to a file if it is cached locally on the minion
@@ -225,9 +238,9 @@ class Client(object):
             if path.endswith('.sls'):
                 # is an sls module!
                 if path.endswith('{0}init.sls'.format(os.sep)):
-                    states.append(path.replace(os.sep, '.')[:-9])
+                    states.append(path.replace('/', '.')[:-9])
                 else:
-                    states.append(path.replace(os.sep, '.')[:-4])
+                    states.append(path.replace('/', '.')[:-4])
         return states
 
     def get_state(self, sls, env):
@@ -244,7 +257,7 @@ class Client(object):
                 return dest
         return False
 
-    def get_dir(self, path, dest='', env='base'):
+    def get_dir(self, path, dest='', env='base', gzip=None):
         '''
         Get a directory recursively from the salt-master
         '''
@@ -267,17 +280,22 @@ class Client(object):
                 # Remove the leading directories from path to derive
                 # the relative path on the minion.
                 minion_relpath = string.lstrip(fn_[len(prefix):], '/')
-                ret.append(self.get_file('salt://{0}'.format(fn_),
-                                         '%s/%s' % (dest, minion_relpath),
-                                         True, env))
+                ret.append(
+                    self.get_file(
+                        'salt://{0}'.format(fn_),
+                        '{0}/{1}'.format(dest, minion_relpath),
+                        True, env, gzip
+                    )
+                )
         # Replicate empty dirs from master
         for fn_ in self.file_list_emptydirs(env):
             if fn_.startswith(path):
                 # Remove the leading directories from path to derive
                 # the relative path on the minion.
                 minion_relpath = string.lstrip(fn_[len(prefix):], '/')
-                minion_mkdir = '%s/%s' % (dest, minion_relpath)
-                os.makedirs(minion_mkdir)
+                minion_mkdir = '{0}/{1}'.format(dest, minion_relpath)
+                if not os.path.isdir(minion_mkdir):
+                    os.makedirs(minion_mkdir)
                 ret.append(minion_mkdir)
         ret.sort()
         return ret
@@ -309,7 +327,7 @@ class Client(object):
                 os.makedirs(destdir)
         try:
             with contextlib.closing(url_open(url)) as srcfp:
-                with open(dest, 'wb') as destfp:
+                with salt.utils.fopen(dest, 'wb') as destfp:
                     shutil.copyfileobj(srcfp, destfp)
             return dest
         except HTTPError as ex:
@@ -319,7 +337,6 @@ class Client(object):
                     *BaseHTTPServer.BaseHTTPRequestHandler.responses[ex.code]))
         except URLError as ex:
             raise MinionError('Error reading {0}: {1}'.format(url, ex.reason))
-        return ''
 
     def get_template(
             self,
@@ -337,8 +354,8 @@ class Client(object):
         sfn = self.cache_file(url, env)
         if not os.path.exists(sfn):
             return ''
-        if template in salt.utils.templates.template_registry:
-            data = salt.utils.templates.template_registry[template](
+        if template in salt.utils.templates.TEMPLATE_REGISTRY:
+            data = salt.utils.templates.TEMPLATE_REGISTRY[template](
                     sfn,
                     **kwargs
                     )
@@ -349,9 +366,11 @@ class Client(object):
             return ''
         if not data['result']:
             # Failed to render the template
-            log.error('Failed to render template with error: {0}'.format(
-                data['data']
-                ))
+            log.error(
+                'Failed to render template with error: {0}'.format(
+                    data['data']
+                )
+            )
             return ''
         if not dest:
             # No destination passed, set the dest as an extrn_files cache
@@ -396,9 +415,10 @@ class LocalClient(Client):
                 return fnd
         return fnd
 
-    def get_file(self, path, dest='', makedirs=False, env='base'):
+    def get_file(self, path, dest='', makedirs=False, env='base', gzip=None):
         '''
         Copies a file from the local files directory into :param:`dest`
+        gzip compression settings are ignored for local files
         '''
         path = self._check_proto(path)
         fnd = self._find_file(path, env)
@@ -415,12 +435,12 @@ class LocalClient(Client):
             return ret
         for path in self.opts['file_roots'][env]:
             for root, dirs, files in os.walk(path, followlinks=True):
-                for fn in files:
+                for fname in files:
                     ret.append(
                         os.path.relpath(
                             os.path.join(
                                 root,
-                                fn
+                                fname
                                 ),
                             path
                             )
@@ -440,6 +460,18 @@ class LocalClient(Client):
                     ret.append(os.path.relpath(root, path))
         return ret
 
+    def dir_list(self, env='base'):
+        '''
+        List the dirs in the file_roots
+        '''
+        ret = []
+        if env not in self.opts['file_roots']:
+            return ret
+        for path in self.opts['file_roots'][env]:
+            for root, dirs, files in os.walk(path, followlinks=True):
+                ret.append(os.path.relpath(root, path))
+        return ret
+
     def hash_file(self, path, env='base'):
         '''
         Return the hash of a file, to get the hash of a file in the file_roots
@@ -451,22 +483,21 @@ class LocalClient(Client):
             path = self._check_proto(path)
         except MinionError:
             if not os.path.isfile(path):
-                err = ('Specified file {0} is not present to generate '
-                        'hash').format(path)
-                log.warning(err)
+                err = 'Specified file {0} is not present to generate hash'
+                log.warning(err.format(path))
                 return ret
             else:
-                with open(path, 'rb') as f:
-                    ret['hsum'] = hashlib.md5(f.read()).hexdigest()
+                with salt.utils.fopen(path, 'rb') as ifile:
+                    ret['hsum'] = hashlib.md5(ifile.read()).hexdigest()
                 ret['hash_type'] = 'md5'
                 return ret
         path = self._find_file(path, env)['path']
         if not path:
             return {}
         ret = {}
-        with open(path, 'rb') as f:
+        with salt.utils.fopen(path, 'rb') as ifile:
             ret['hsum'] = getattr(hashlib, self.opts['hash_type'])(
-                f.read()).hexdigest()
+                ifile.read()).hexdigest()
         ret['hash_type'] = self.opts['hash_type']
         return ret
 
@@ -526,17 +557,23 @@ class RemoteClient(Client):
         self.auth = salt.crypt.SAuth(opts)
         self.sreq = salt.payload.SREQ(self.opts['master_uri'])
 
-    def get_file(self, path, dest='', makedirs=False, env='base'):
+    def get_file(self, path, dest='', makedirs=False, env='base', gzip=None):
         '''
         Get a single file from the salt-master
         path must be a salt server location, aka, salt://path/to/file, if
         dest is ommited, then the downloaded file will be placed in the minion
         cache
         '''
+        log.info('Fetching file \'{0}\''.format(path))
+        d_tries = 0
         path = self._check_proto(path)
         load = {'path': path,
                 'env': env,
                 'cmd': '_serve_file'}
+        if gzip:
+            gzip = int(gzip)
+            load['gzip'] = gzip
+
         fn_ = None
         if dest:
             destdir = os.path.dirname(dest)
@@ -545,7 +582,7 @@ class RemoteClient(Client):
                     os.makedirs(destdir)
                 else:
                     return False
-            fn_ = open(dest, 'wb+')
+            fn_ = salt.utils.fopen(dest, 'wb+')
         while True:
             if not fn_:
                 load['loc'] = 0
@@ -561,20 +598,40 @@ class RemoteClient(Client):
                         )
             except SaltReqTimeoutError:
                 return ''
+
             if not data['data']:
                 if not fn_ and data['dest']:
                     # This is a 0 byte file on the master
                     with self._cache_loc(data['dest'], env) as cache_dest:
                         dest = cache_dest
                         if not os.path.exists(cache_dest):
-                            with open(cache_dest, 'wb+') as f:
-                                f.write(data['data'])
+                            with salt.utils.fopen(cache_dest, 'wb+') as ofile:
+                                ofile.write(data['data'])
+                if 'hsum' in data and d_tries < 3:
+                    # Master has prompted a file verification, if the
+                    # verification fails, redownload the file. Try 3 times
+                    d_tries += 1
+                    with salt.utils.fopen(dest, 'rb') as fp_:
+                        hsum = getattr(
+                                hashlib,
+                                data.get('hash_type', 'md5')
+                                )(fp_.read()).hexdigest()
+                        if hsum != data['hsum']:
+                            log.warn(
+                                ('Bad download of file {0}, attempt {1} of 3'
+                                    ).format(path, d_tries)
+                                )
+                            continue
                 break
             if not fn_:
                 with self._cache_loc(data['dest'], env) as cache_dest:
                     dest = cache_dest
-                    fn_ = open(dest, 'wb+')
-            fn_.write(data['data'])
+                    fn_ = salt.utils.fopen(dest, 'wb+')
+            if data.get('gzip', None):
+                data = salt.utils.gzip_util.uncompress(data['data'])
+            else:
+                data = data['data']
+            fn_.write(data)
         if fn_:
             fn_.close()
         return dest
@@ -613,6 +670,23 @@ class RemoteClient(Client):
         except SaltReqTimeoutError:
             return ''
 
+    def dir_list(self, env='base'):
+        '''
+        List the dirs on the master
+        '''
+        load = {'env': env,
+                'cmd': '_dir_list'}
+        try:
+            return self.auth.crypticle.loads(
+                    self.sreq.send(
+                        'aes',
+                        self.auth.crypticle.dumps(load),
+                        3,
+                        60)
+                    )
+        except SaltReqTimeoutError:
+            return ''
+
     def hash_file(self, path, env='base'):
         '''
         Return the hash of a file, to get the hash of a file on the salt
@@ -623,14 +697,13 @@ class RemoteClient(Client):
             path = self._check_proto(path)
         except MinionError:
             if not os.path.isfile(path):
-                err = ('Specified file {0} is not present to generate '
-                        'hash').format(path)
-                log.warning(err)
+                err = 'Specified file {0} is not present to generate hash'
+                log.warning(err.format(path))
                 return {}
             else:
                 ret = {}
-                with open(path, 'rb') as f:
-                    ret['hsum'] = hashlib.md5(f.read()).hexdigest()
+                with salt.utils.fopen(path, 'rb') as ifile:
+                    ret['hsum'] = hashlib.md5(ifile.read()).hexdigest()
                 ret['hash_type'] = 'md5'
                 return ret
         load = {'path': path,
@@ -686,7 +759,8 @@ class RemoteClient(Client):
         master.
         '''
         load = {'cmd': '_ext_nodes',
-                'id': self.opts['id']}
+                'id': self.opts['id'],
+                'opts': self.opts}
         try:
             return self.auth.crypticle.loads(
                     self.sreq.send(

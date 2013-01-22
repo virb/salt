@@ -2,24 +2,8 @@
 Module for running arbitrary tests
 '''
 
+# Import salt libs
 import time
-
-
-# Load in default options for the module
-__opts__ = {
-    'test.foo': 'foo'
-}
-# Load the outputters for the module
-__outputter__ = {
-    'echo': 'txt',
-    'ping': 'txt',
-    'fib': 'yaml',
-    'version': 'txt',
-    'collatz': 'yaml',
-    'conf_test': 'txt',
-    'get_opts': 'yaml',
-    'outputter': 'txt',
-}
 
 
 def echo(text):
@@ -44,6 +28,20 @@ def ping():
     '''
     return True
 
+
+def sleep(length):
+    '''
+    Instruct the minion to initiate a process that will sleep for a given
+    period of time.
+
+    CLI Example::
+
+        salt '*' test.sleep 20
+    '''
+    time.sleep(int(length))
+    return True
+
+
 def version():
     '''
     Return the version of salt on the minion
@@ -65,7 +63,7 @@ def conf_test():
 
         salt '*' test.conf_test
     '''
-    return __opts__['test.foo']
+    return __salt__['config.option']('test.foo')
 
 
 def get_opts():
@@ -118,11 +116,11 @@ def fib(num):
     '''
     num = int(num)
     start = time.time()
-    a, b = 0, 1
+    fib_a, fib_b = 0, 1
     ret = [0]
-    while b < num:
-        ret.append(b)
-        a, b = b, a + b
+    while fib_b < num:
+        ret.append(fib_b)
+        fib_a, fib_b = fib_b, fib_a + fib_b
     return ret, time.time() - start
 
 

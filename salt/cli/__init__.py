@@ -6,20 +6,23 @@ The management of salt command line utilities are stored in here
 import os
 import sys
 
-# Import salt components
+# Import salt libs
 import salt.cli.caller
 import salt.cli.cp
-import salt.cli.key
 import salt.cli.batch
 import salt.client
 import salt.output
 import salt.runner
+import salt.auth
+import salt.key
 
-import optparse
 from salt.utils import parsers
-from salt.utils.verify import verify_env
-from salt.version import __version__ as VERSION
-from salt.exceptions import SaltInvocationError, SaltClientError, SaltException
+from salt.utils.verify import verify_env, verify_files
+from salt.exceptions import (
+    SaltInvocationError,
+    SaltClientError,
+    EauthAuthenticationError
+)
 
 
 class SaltCMD(parsers.SaltCMDOptionParser):
@@ -34,73 +37,87 @@ class SaltCMD(parsers.SaltCMDOptionParser):
         self.parse_args()
 
         try:
-            local = salt.client.LocalClient(self.get_config_file_path('master'))
+            local = salt.client.LocalClient(
+                self.get_config_file_path('master')
+            )
         except SaltClientError as exc:
             self.exit(2, '{0}\n'.format(exc))
             return
 
-        if self.options.query:
-            ret = local.find_cmd(self.config['cmd'])
-            for jid in ret:
-                if isinstance(ret, list) or isinstance(ret, dict):
-                    print('Return data for job {0}:'.format(jid))
-                    salt.output.display_output(ret[jid], None, self.config)
-                    print('')
-        elif self.options.batch:
+        if self.options.batch:
             batch = salt.cli.batch.Batch(self.config)
-            batch.run()
+            # Printing the output is already taken care of in run() itself
+            for res in batch.run():
+                pass
         else:
             if self.options.timeout <= 0:
                 self.options.timeout = local.opts['timeout']
 
-            args = [
-                self.config['tgt'],
-                self.config['fun'],
-                self.config['arg'],
-                self.options.timeout,
-            ]
+            kwargs = {
+                'tgt': self.config['tgt'],
+                'fun': self.config['fun'],
+                'arg': self.config['arg'],
+                'timeout': self.options.timeout}
+
+            if 'token' in self.config:
+                kwargs['token'] = self.config['token']
 
             if self.selected_target_option:
-                args.append(self.selected_target_option)
+                kwargs['expr_form'] = self.selected_target_option
             else:
-                args.append('glob')
+                kwargs['expr_form'] = 'glob'
 
             if getattr(self.options, 'return'):
-                args.append(getattr(self.options, 'return'))
-            else:
-                args.append('')
+                kwargs['ret'] = getattr(self.options, 'return')
+
+            if self.options.eauth:
+                resolver = salt.auth.Resolver(self.config)
+                res = resolver.cli(self.options.eauth)
+                if self.options.mktoken and res:
+                    tok = resolver.token_cli(
+                            self.options.eauth,
+                            res
+                            )
+                    if tok:
+                        kwargs['token'] = tok.get('token', '')
+                if not res:
+                    sys.exit(2)
+                kwargs.update(res)
+                kwargs['eauth'] = self.options.eauth
+
             try:
                 # local will be None when there was an error
                 if local:
                     if self.options.static:
                         if self.options.verbose:
-                            args.append(True)
-                        full_ret = local.cmd_full_return(*args)
+                            kwargs['verbose'] = True
+                        full_ret = local.cmd_full_return(**kwargs)
                         ret, out = self._format_ret(full_ret)
                         self._output_ret(ret, out)
                     elif self.config['fun'] == 'sys.doc':
                         ret = {}
                         out = ''
-                        for full_ret in local.cmd_cli(*args):
+                        for full_ret in local.cmd_cli(**kwargs):
                             ret_, out = self._format_ret(full_ret)
                             ret.update(ret_)
                         self._output_ret(ret, out)
                     else:
                         if self.options.verbose:
-                            args.append(True)
-                        for full_ret in local.cmd_cli(*args):
+                            kwargs['verbose'] = True
+                        for full_ret in local.cmd_cli(**kwargs):
                             ret, out = self._format_ret(full_ret)
                             self._output_ret(ret, out)
-            except SaltInvocationError as exc:
+            except (SaltInvocationError, EauthAuthenticationError) as exc:
                 ret = exc
                 out = ''
+                self._output_ret(ret, out)
 
     def _output_ret(self, ret, out):
         '''
         Print the output from a single return to the terminal
         '''
         # Handle special case commands
-        if self.config['fun'] == 'sys.doc':
+        if self.config['fun'] == 'sys.doc' and not isinstance(ret, Exception):
             self._print_docs(ret)
         else:
             # Determine the proper output method and run it
@@ -163,12 +180,18 @@ class SaltKey(parsers.SaltKeyOptionParser):
         self.parse_args()
 
         if self.config['verify_env']:
-            verify_env([
+            verify_env_dirs = []
+            if not self.config['gen_keys']:
+                verify_env_dirs.extend([
+                    self.config['pki_dir'],
                     os.path.join(self.config['pki_dir'], 'minions'),
                     os.path.join(self.config['pki_dir'], 'minions_pre'),
                     os.path.join(self.config['pki_dir'], 'minions_rejected'),
-                    os.path.dirname(self.config['key_logfile']),
-                ],
+                    os.path.dirname(self.config['key_logfile'])
+                ])
+
+            verify_env(
+                verify_env_dirs,
                 self.config['user'],
                 permissive=self.config['permissive_pki_access'],
                 pki_dir=self.config['pki_dir'],
@@ -176,7 +199,7 @@ class SaltKey(parsers.SaltKeyOptionParser):
 
         self.setup_logfile_logger()
 
-        key = salt.cli.key.Key(self.config)
+        key = salt.key.KeyCLI(self.config)
         key.run()
 
 
@@ -195,12 +218,25 @@ class SaltCall(parsers.SaltCallOptionParser):
             verify_env([
                     self.config['pki_dir'],
                     self.config['cachedir'],
-                    os.path.dirname(self.config['log_file'])
                 ],
                 self.config['user'],
                 permissive=self.config['permissive_pki_access'],
                 pki_dir=self.config['pki_dir'],
             )
+            if (not self.config['log_file'].startswith('tcp://') or
+                not self.config['log_file'].startswith('udp://') or
+                not self.config['log_file'].startswith('file://')):
+                # Logfile is not using Syslog, verify
+                verify_files(
+                    [self.config['log_file']],
+                    self.config['user']
+                )
+
+        if self.options.local:
+            self.config['file_client'] = 'local'
+
+        # Setup file logging!
+        self.setup_logfile_logger()
 
         caller = salt.cli.caller.Caller(self.config)
 

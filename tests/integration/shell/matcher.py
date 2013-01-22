@@ -1,5 +1,6 @@
 # Import python libs
 import sys
+import yaml
 
 # Import salt libs
 from saltunittest import TestLoader, TextTestRunner
@@ -92,6 +93,10 @@ class MatchTest(integration.ShellCase, integration.ShellCaseCommonTestsMixIn):
         data = '\n'.join(data)
         self.assertIn('sub_minion', data)
         self.assertNotIn('minion', data.replace('sub_minion', 'stub'))
+        data = self.run_salt('-I "knights:Bedevere" test.ping')
+        data = '\n'.join(data)
+        self.assertIn('minion', data)
+        self.assertIn('sub_minion', data)
 
     def test_compound(self):
         '''
@@ -108,6 +113,24 @@ class MatchTest(integration.ShellCase, integration.ShellCaseCommonTestsMixIn):
         self.assertIn('sub_minion', data)
         self.assertNotIn('minion', data.replace('sub_minion', 'stub'))
 
+    def test_exsel(self):
+        data = self.run_salt('-X test.ping test.ping')
+        data = '\n'.join(data)
+        self.assertIn('minion', data)
+        self.assertIn('sub_minion', data)
+
+    def test_ipcadr(self):
+        subnets_data = self.run_salt('--out yaml \'*\' network.subnets')
+        yaml_data = yaml.load('\n'.join(subnets_data))
+
+        # We're just after the first defined subnet from 'minion'
+        subnet = yaml_data['minion'][0]
+
+        data = self.run_salt('-S {0} test.ping'.format(subnet))
+        data = '\n'.join(data)
+        self.assertIn('minion', data)
+        self.assertIn('sub_minion', data)
+
     def test_static(self):
         '''
         test salt static call
@@ -115,6 +138,29 @@ class MatchTest(integration.ShellCase, integration.ShellCaseCommonTestsMixIn):
         data = self.run_salt('minion test.ping --static')
         data = '\n'.join(data)
         self.assertIn('minion', data)
+
+    def test_salt_documentation(self):
+        '''
+        Test to see if we're supporting --doc
+        '''
+        data = self.run_salt('-d user.add')
+        self.assertIn('user.add:', data)
+
+    def test_salt_documentation_arguments_not_assumed(self):
+        '''
+        Test to see if we're not auto-adding '*' and 'sys.doc' to the call
+        '''
+        data = self.run_salt('-d')
+        self.assertIn('user.add:', data)
+        data = self.run_salt('\'*\' -d')
+        self.assertIn('user.add:', data)
+        data = self.run_salt('\'*\' -d user.add')
+        self.assertIn('user.add:', data)
+        data = self.run_salt('\'*\' sys.doc -d user.add')
+        self.assertIn('user.add:', data)
+        data = self.run_salt('\'*\' sys.doc user.add')
+        self.assertIn('user.add:', data)
+
 
 
 if __name__ == "__main__":

@@ -13,7 +13,7 @@ import salt.crypt
 from salt.exceptions import SaltReqTimeoutError
 from salt._compat import pickle
 
-# Import zeromq
+# Import third party libs
 import zmq
 
 log = salt.log.logging.getLogger(__name__)
@@ -23,7 +23,7 @@ try:
     import msgpack
     # There is a serialization issue on ARM and potentially other platforms
     # for some msgpack bindings, check for it
-    if msgpack.loads(msgpack.dumps([1,2,3])) is None:
+    if msgpack.loads(msgpack.dumps([1, 2, 3]), use_list=True) is None:
         raise ImportError
 except ImportError:
     # Fall back to msgpack_pure
@@ -32,8 +32,8 @@ except ImportError:
     except ImportError:
         # TODO: Come up with a sane way to get a configured logfile
         #       and write to the logfile when this error is hit also
-        log_format = '[%(levelname)-8s] %(message)s'
-        salt.log.setup_console_logger(log_format=log_format)
+        LOG_FORMAT = '[%(levelname)-8s] %(message)s'
+        salt.log.setup_console_logger(log_format=LOG_FORMAT)
         log.fatal('Unable to import msgpack or msgpack_pure python modules')
         sys.exit(1)
 
@@ -118,15 +118,22 @@ class Serial(object):
 
 class SREQ(object):
     '''
-    Create a generic interface to wrap salt zeromq req calls. 
+    Create a generic interface to wrap salt zeromq req calls.
     '''
-    def __init__(self, master, serial='msgpack', linger=0):
+    def __init__(self, master, id_='', serial='msgpack', linger=0):
         self.master = master
         self.serial = Serial(serial)
-        context = zmq.Context()
-        self.socket = context.socket(zmq.REQ)
+        self.context = zmq.Context()
+        self.socket = self.context.socket(zmq.REQ)
+        if hasattr(zmq, 'RECONNECT_IVL_MAX'):
+            self.socket.setsockopt(
+                zmq.RECONNECT_IVL_MAX, 5000
+            )
         self.socket.linger = linger
+        if id_:
+            self.socket.setsockopt(zmq.IDENTITY, id_)
         self.socket.connect(master)
+        self.poller = zmq.Poller()
 
     def send(self, enc, load, tries=1, timeout=60):
         '''
@@ -136,18 +143,23 @@ class SREQ(object):
         payload['load'] = load
         package = self.serial.dumps(payload)
         self.socket.send(package)
-        poller = zmq.Poller()
-        poller.register(self.socket, zmq.POLLIN)
+        self.poller.register(self.socket, zmq.POLLIN)
         tried = 0
         while True:
-            if not poller.poll(timeout*1000) and tried >= tries:
-                raise SaltReqTimeoutError('Waited {0} seconds'.format(timeout))
-            else:
-                break
+            polled = self.poller.poll(timeout * 1000)
             tried += 1
-        ret = self.serial.loads(self.socket.recv())
-        poller.unregister(self.socket)
-        return ret
+            if polled:
+                break
+            elif tried >= tries:
+                raise SaltReqTimeoutError(
+                    'Waited {0} seconds'.format(
+                        timeout * tried
+                    )
+                )
+        try:
+            return self.serial.loads(self.socket.recv())
+        finally:
+            self.poller.unregister(self.socket)
 
     def send_auto(self, payload):
         '''
@@ -156,3 +168,18 @@ class SREQ(object):
         enc = payload.get('enc', 'clear')
         load = payload.get('load', {})
         return self.send(enc, load)
+
+    def destroy(self):
+        for socket in self.poller.sockets.keys():
+            if socket.closed is False:
+                socket.setsockopt(zmq.LINGER, 1)
+                socket.close()
+            self.poller.unregister(socket)
+        if self.socket.closed is False:
+            self.socket.setsockopt(zmq.LINGER, 1)
+            self.socket.close()
+        if self.context.closed is False:
+            self.context.term()
+
+    def __del__(self):
+        self.destroy()

@@ -1,22 +1,30 @@
 '''
 Manages configuration files via augeas
+
+:depends:   - Augeas Python adapter
 '''
+
+# Load third party libs
+HAS_AUGEAS = False
+try:
+    from augeas import Augeas
+    HAS_AUGEAS = True
+except ImportError:
+    pass
 
 
 def __virtual__():
-    ''' Only run this module if the augeas python module is installed '''
-    try:
-        from augeas import Augeas
-        _ = Augeas
-    except ImportError:
-        return False
-    else:
-        return "augeas"
+    '''
+    Only run this module if the augeas python module is installed
+    '''
+    if HAS_AUGEAS:
+        return 'augeas'
+    return False
 
 
 def _recurmatch(path, aug):
     '''
-    recursive generator providing the infrastructure for
+    Recursive generator providing the infrastructure for
     augtools print behaviour.
 
     This function is based on test_augeas.py from
@@ -27,10 +35,10 @@ def _recurmatch(path, aug):
         clean_path = path.rstrip('/*')
         yield (clean_path, aug.get(path))
 
-        for i in aug.match(clean_path + "/*"):
+        for i in aug.match(clean_path + '/*'):
             i = i.replace('!', '\!')  # escape some dirs
-            for x in _recurmatch(i, aug):
-                yield x
+            for _match in _recurmatch(i, aug):
+                yield _match
 
 
 def _lstrip_word(string, prefix):
@@ -52,15 +60,12 @@ def get(path, value=''):
 
         salt '*' augeas.get /files/etc/hosts/1/ ipaddr
     '''
-
-    from augeas import Augeas
     aug = Augeas()
-
     ret = {}
 
     path = path.rstrip('/')
     if value:
-        path += "/{0}".format(value.strip('/'))
+        path += '/{0}'.format(value.strip('/'))
 
     try:
         _match = aug.match(path)
@@ -106,14 +111,8 @@ def setvalue(*args):
 
         %wheel ALL = PASSWD : ALL , NOPASSWD : /usr/bin/apt-get , /usr/bin/aptitude
     '''
-
-
-    from augeas import Augeas
     aug = Augeas()
-
     ret = {'retval': False}
-
-    prefix = None
 
 
     tuples = filter(lambda x: not x.startswith('prefix='), args)
@@ -151,10 +150,7 @@ def match(path, value=''):
 
         salt '*' augeas.match /files/etc/services/service-name ssh
     '''
-
-    from augeas import Augeas
     aug = Augeas()
-
     ret = {}
 
     try:
@@ -178,9 +174,7 @@ def remove(path):
 
         salt '*' augeas.remove /files/etc/sysctl.conf/net.ipv4.conf.all.log_martians
     '''
-    from augeas import Augeas
     aug = Augeas()
-
     ret = {'retval': False}
     try:
         count = aug.remove(path)
@@ -197,7 +191,7 @@ def remove(path):
     return ret
 
 
-def ls(path):
+def ls(path):  # pylint: disable-msg=C0103
     '''
     List the direct children of a node
 
@@ -205,7 +199,6 @@ def ls(path):
 
         salt '*' augeas.ls /files/etc/passwd
     '''
-
     def _match(path):
         ''' Internal match function '''
         try:
@@ -218,7 +211,6 @@ def ls(path):
             ret[_ma] = aug.get(_ma)
         return ret
 
-    from augeas import Augeas
     aug = Augeas()
 
     path = path.rstrip('/') + '/'
@@ -237,7 +229,6 @@ def ls(path):
 
 
 def tree(path):
-
     '''
     Returns recursively the complete tree of a node
 
@@ -245,8 +236,6 @@ def tree(path):
 
         salt '*' augeas.tree /files/etc/
     '''
-
-    from augeas import Augeas
     aug = Augeas()
 
     path = path.rstrip('/') + '/'

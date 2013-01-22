@@ -53,11 +53,15 @@ def info(name):
 
         salt '*' group.info foo
     '''
-    grinfo = grp.getgrnam(name)
-    return {'name': grinfo.gr_name,
-            'passwd': grinfo.gr_passwd,
-            'gid': grinfo.gr_gid,
-            'members': grinfo.gr_mem}
+    try:
+        grinfo = grp.getgrnam(name)
+    except KeyError:
+        return {}
+    else:
+        return {'name': grinfo.gr_name,
+                'passwd': grinfo.gr_passwd,
+                'gid': grinfo.gr_gid,
+                'members': grinfo.gr_mem}
 
 
 def getent():
@@ -85,7 +89,7 @@ def chgid(name, gid):
     pre_gid = __salt__['file.group_to_gid'](name)
     if gid == pre_gid:
         return True
-    cmd = 'pw groupmod -g {0} {1}'.format(gid, name)
+    cmd = 'pw groupmod {0} -g {1}'.format(name, gid)
     __salt__['cmd.run'](cmd)
     post_gid = __salt__['file.group_to_gid'](name)
     if post_gid != pre_gid:

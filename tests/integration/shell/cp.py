@@ -1,58 +1,113 @@
 # -*- coding: utf-8 -*-
-"""
+'''
     tests.integration.shell.cp
     ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    :copyright: © 2012 UfSoft.org - :email:`Pedro Algarvio (pedro@algarvio.me)`
+    :codeauthor: :email:`Pedro Algarvio (pedro@algarvio.me)`
+    :copyright: © 2012 by the SaltStack Team, see AUTHORS for more details.
     :license: Apache 2.0, see LICENSE for more details.
-"""
+'''
 
 # Import python libs
 import os
-import re
 import sys
-import string
-import random
+import yaml
+import pipes
 
 # Import salt libs
-from saltunittest import TestLoader, TextTestRunner
+import salt.utils
 import integration
-from integration import TestDaemon
+from saltunittest import TestLoader, TextTestRunner
 
 
 class CopyTest(integration.ShellCase, integration.ShellCaseCommonTestsMixIn):
 
     _call_binary_ = 'salt-cp'
 
-    def setUp(self):
-        self.testfile = os.path.join(integration.TMP, 'testfile')
-        self.testcontents = ''.join(
-            random.choice(string.ascii_uppercase) for x in range(128)
-        )
-        open(self.testfile, 'w').write(self.testcontents)
-
-    def tearDown(self):
-        os.unlink(self.testfile)
-
     def test_cp_testfile(self):
         '''
         test salt-cp
         '''
-        data = ''.join(self.run_salt('"*" test.ping'))
-        for minion in re.findall(r"{['|\"]([^:]+)['|\"]: True}", data):
-            minion_testfile = os.path.join(
-                integration.TMP, "{0}_testfile".format(minion)
-            )
-            self.run_cp("minion {0} {1}".format(self.testfile, minion_testfile))
-            self.assertTrue(os.path.isfile(minion_testfile))
-            self.assertTrue(open(minion_testfile, 'r').read()==self.testcontents)
-            os.unlink(minion_testfile)
+        minions = []
+        for line in self.run_salt('--out yaml "*" test.ping'):
+            if not line:
+                continue
+            data = yaml.load(line)
+            minions.extend(data.keys())
 
+        self.assertNotEqual(minions, [])
+
+        testfile = os.path.abspath(
+            os.path.join(
+                os.path.dirname(os.path.dirname(__file__)),
+                'files', 'file', 'base', 'testfile'
+            )
+        )
+        testfile_contents = salt.utils.fopen(testfile, 'r').read()
+
+        for idx, minion in enumerate(minions):
+            ret = self.run_salt(
+                '--out yaml {0} file.directory_exists {1}'.format(
+                    pipes.quote(minion), integration.TMP
+                )
+            )
+            data = yaml.load('\n'.join(ret))
+            if data[minion] is False:
+                ret = self.run_salt(
+                    '--out yaml {0} file.makedirs {1}'.format(
+                        pipes.quote(minion),
+                        integration.TMP
+                    )
+                )
+
+                data = yaml.load('\n'.join(ret))
+                self.assertTrue(data[minion])
+
+            minion_testfile = os.path.join(
+                integration.TMP, 'cp_{0}_testfile'.format(idx)
+            )
+
+            ret = self.run_cp('{0} {1} {2}'.format(
+                pipes.quote(minion),
+                pipes.quote(testfile),
+                pipes.quote(minion_testfile)
+            ))
+
+            data = yaml.load('\n'.join(ret))
+            for part in data.values():
+                self.assertTrue(part[minion_testfile])
+
+            ret = self.run_salt(
+                '--out yaml {0} file.file_exists {1}'.format(
+                    pipes.quote(minion),
+                    pipes.quote(minion_testfile)
+                )
+            )
+            data = yaml.load('\n'.join(ret))
+            self.assertTrue(data[minion])
+
+            ret = self.run_salt(
+                '--out yaml {0} file.contains {1} {2}'.format(
+                    pipes.quote(minion),
+                    pipes.quote(minion_testfile),
+                    pipes.quote(testfile_contents)
+                )
+            )
+            data = yaml.load('\n'.join(ret))
+            self.assertTrue(data[minion])
+            ret = self.run_salt(
+                '--out yaml {0} file.remove {1}'.format(
+                    pipes.quote(minion),
+                    pipes.quote(minion_testfile)
+                )
+            )
+            data = yaml.load('\n'.join(ret))
+            self.assertTrue(data[minion])
 
 if __name__ == "__main__":
     loader = TestLoader()
     tests = loader.loadTestsFromTestCase(CopyTest)
     print('Setting up Salt daemons to execute tests')
-    with TestDaemon():
+    with integration.TestDaemon():
         runner = TextTestRunner(verbosity=1).run(tests)
         sys.exit(runner.wasSuccessful())

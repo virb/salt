@@ -2,17 +2,19 @@
 Windows Service module.
 '''
 
+# Import python libs
 import time
+import salt.utils
 
 
 def __virtual__():
     '''
     Only works on Windows systems
     '''
-    if __grains__['os'] == 'Windows':
+    if salt.utils.is_windows():
         return 'service'
-    else:
-        return False
+    return False
+
 
 def get_enabled():
     '''
@@ -25,7 +27,7 @@ def get_enabled():
     ret = set()
     services = []
     cmd = 'sc query type= service'
-    lines = __salt__['cmd.run'](cmd).split('\n')
+    lines = __salt__['cmd.run'](cmd).splitlines()
     for line in lines:
         if 'SERVICE_NAME:' in line:
             comps = line.split(':', 1)
@@ -34,11 +36,12 @@ def get_enabled():
             services.append(comps[1].strip())
     for service in services:
         cmd2 = 'sc qc "{0}"'.format(service)
-        lines = __salt__['cmd.run'](cmd2).split('\n')
+        lines = __salt__['cmd.run'](cmd2).splitlines()
         for line in lines:
             if 'AUTO_START' in line:
                 ret.add(service)
     return sorted(ret)
+
 
 def get_disabled():
     '''
@@ -51,7 +54,7 @@ def get_disabled():
     ret = set()
     services = []
     cmd = 'sc query type= service'
-    lines = __salt__['cmd.run'](cmd).split('\n')
+    lines = __salt__['cmd.run'](cmd).splitlines()
     for line in lines:
         if 'SERVICE_NAME:' in line:
             comps = line.split(':', 1)
@@ -60,13 +63,14 @@ def get_disabled():
             services.append(comps[1].strip())
     for service in services:
         cmd2 = 'sc qc "{0}"'.format(service)
-        lines = __salt__['cmd.run'](cmd2).split('\n')
+        lines = __salt__['cmd.run'](cmd2).splitlines()
         for line in lines:
             if 'DEMAND_START' in line:
                 ret.add(service)
             elif  'DISABLED' in line:
                 ret.add(service)
     return sorted(ret)
+
 
 def get_all():
     '''
@@ -77,6 +81,7 @@ def get_all():
         salt '*' service.get_all
     '''
     return sorted(get_enabled() + get_disabled())
+
 
 def start(name):
     '''
@@ -111,7 +116,7 @@ def restart(name):
         salt '*' service.restart <service name>
     '''
     stopcmd = 'sc stop "{0}"'.format(name)
-    stopped = __salt__['cmd.run'](stopcmd)
+    __salt__['cmd.run'](stopcmd)
     servicestate = status(name)
     while True:
         servicestate = status(name)
@@ -134,13 +139,14 @@ def status(name, sig=None):
         salt '*' service.status <service name> [service signature]
     '''
     cmd = 'sc query "{0}"'.format(name)
-    status = __salt__['cmd.run'](cmd).split('\n')
+    status = __salt__['cmd.run'](cmd).splitlines()
     for line in status:
         if 'RUNNING' in line:
             return getsid(name)
         elif 'PENDING' in line:
             return getsid(name)
     return ''
+
 
 def getsid(name):
     '''
@@ -151,7 +157,7 @@ def getsid(name):
         salt '*' service.getsid <service name>
     '''
     cmd = 'sc showsid "{0}"'.format(name)
-    lines = __salt__['cmd.run'](cmd).split('\n')
+    lines = __salt__['cmd.run'](cmd).splitlines()
     for line in lines:
         if 'SERVICE SID:' in line:
             comps = line.split(':', 1)
@@ -160,7 +166,8 @@ def getsid(name):
             else:
                 return None
 
-def enable(name):
+
+def enable(name, **kwargs):
     '''
     Enable the named service to start at boot
 
@@ -172,7 +179,7 @@ def enable(name):
     return not __salt__['cmd.retcode'](cmd)
 
 
-def disable(name):
+def disable(name, **kwargs):
     '''
     Disable the named service to start at boot
 
@@ -193,6 +200,7 @@ def enabled(name):
         salt '*' service.enabled <service name>
     '''
     return name in get_enabled()
+
 
 def disabled(name):
     '''
